@@ -1,6 +1,6 @@
 [project]
 name = "emotional-deescalation-mcp"
-version = "0.1.0"
+version = "0.1.0-1"
 description = "Universal MCP server for emotional tone analysis and de-escalation in communications"
 readme = "README.md"
 license = "MIT"
