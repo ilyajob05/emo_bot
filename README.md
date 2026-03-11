@@ -109,29 +109,80 @@ Returns a table:
 | 4 | bot | neutral | 0 | +1 | -1 | 0 | -1 | business |
 | 5 | user | neutral | 0 | -1 | 0 | -1 | 0 | resigned |
 
-## Setup
+## Installation & Setup
+
+### Prerequisites
+
+- Python 3.11+
+- An Anthropic API key ([get one here](https://console.anthropic.com/settings/keys))
+
+### Quick Start with Claude Code
+
+The easiest way to use this server is with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
+**Step 1.** Install the MCP server (one-time setup):
 
 ```bash
-pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...
-python server.py
+claude mcp add emotional-deescalation -e ANTHROPIC_API_KEY=sk-ant-your-key-here -- uvx emotional-deescalation-mcp
 ```
 
-### Claude Desktop / Claude Code config
+> This command registers the server in Claude Code. Replace `sk-ant-your-key-here` with your actual Anthropic API key.
+
+**Step 2.** Start Claude Code as usual:
+
+```bash
+claude
+```
+
+That's it! The tools `emotion_analyze`, `emotion_de_escalate`, and `emotion_evaluate_dialogue` are now available in your Claude Code session. You can ask Claude to analyze messages, de-escalate responses, or evaluate dialogues.
+
+### Claude Desktop
+
+Add to your Claude Desktop config file (`claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "emotional-deescalation": {
-      "command": "python",
-      "args": ["/path/to/emotional-mcp/server.py"],
+      "command": "uvx",
+      "args": ["emotional-deescalation-mcp"],
       "env": {
-        "ANTHROPIC_API_KEY": "sk-ant-..."
+        "ANTHROPIC_API_KEY": "sk-ant-your-key-here"
       }
     }
   }
 }
 ```
+
+### Manual / Development Setup
+
+```bash
+git clone https://github.com/ilyajob05/emo_bot.git
+cd emo_bot
+uv sync
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+python server.py
+```
+
+### Adding to any project via `.mcp.json`
+
+Place an `.mcp.json` file in the root of your project so that Claude Code automatically connects to the server when opened in that directory:
+
+```json
+{
+  "mcpServers": {
+    "emotional-deescalation": {
+      "command": "uvx",
+      "args": ["emotional-deescalation-mcp"],
+      "env": {
+        "ANTHROPIC_API_KEY": ""
+      }
+    }
+  }
+}
+```
+
+> Set the `ANTHROPIC_API_KEY` environment variable in your shell, or fill it in directly in the file.
 
 ## Agent integration
 
