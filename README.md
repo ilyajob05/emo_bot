@@ -123,10 +123,15 @@ The easiest way to use this server is with [Claude Code](https://docs.anthropic.
 **Step 1.** Install the MCP server (one-time setup):
 
 ```bash
-claude mcp add emotional-deescalation -e ANTHROPIC_API_KEY=sk-ant-your-key-here -- uvx emotional-deescalation-mcp
+claude mcp add emotional-deescalation -- uvx emotional-deescalation-mcp
 ```
 
-> This command registers the server in Claude Code. Replace `sk-ant-your-key-here` with your actual Anthropic API key.
+> The server uses the `ANTHROPIC_API_KEY` from your environment. If Claude Code is already installed and configured, the key is inherited automatically.
+>
+> If the key is not in your environment, pass it explicitly:
+> ```bash
+> claude mcp add emotional-deescalation -e ANTHROPIC_API_KEY=sk-ant-your-key-here -- uvx emotional-deescalation-mcp
+> ```
 
 **Step 2.** Start Claude Code as usual:
 
