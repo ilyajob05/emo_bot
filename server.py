@@ -20,6 +20,23 @@ each on a discrete scale: -2 (low), -1 (normal-), 0 (normal), +1 (normal+), +2 (
 | Assertiveness(A)| uncertain, meek  | balanced | demanding, forceful |
 | Expressiveness(E)| reserved, terse | balanced | emotional, intense  |
 
+## Session Modes
+
+The server supports stateful sessions with two operating modes:
+
+- **Adaptive** (default): bot mirrors user's style but gradually shifts toward
+  a positive "attractor" vector (configurable). Each turn moves adaptive_speed
+  fraction of the distance toward the target. Creates natural, non-jarring
+  convergence toward a constructive communication zone.
+
+- **De-escalation**: activated automatically when user shows trigger emotions
+  (anger, disgust, fear) combined with high assertiveness or expressiveness.
+  Applies stronger corrective shifts. Reverts to adaptive after consecutive
+  calm turns (cooldown).
+
+Both modes support custom configuration: target vectors, shift speeds,
+trigger thresholds, and per-axis de-escalation shifts.
+
 ## De-escalation Strategy
 
 Per-axis shifts instead of a single coefficient:
@@ -37,6 +54,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from enum import Enum
 from typing import Any, Literal
 
@@ -80,6 +98,37 @@ DEFAULT_DE_ESCALATION_SHIFTS: dict[str, int] = {
     "assertiveness": -1,
     "expressiveness": -1,
 }
+
+
+# ─── Engine Mode ─────────────────────────────────────────────────────────────
+
+class EngineMode(str, Enum):
+    """Execution mode for analysis tools.
+
+    HOST — return structured prompt for the host LLM (Claude Desktop/Code/LM Studio)
+           to execute. No external API calls. Free for the user.
+    API  — server calls LLM API directly (Anthropic, OpenAI-compatible, etc.).
+           Requires API key. More autonomous.
+    """
+    HOST = "host"
+    API = "api"
+
+
+def _resolve_mode(per_call: str | None = None) -> EngineMode:
+    """Resolve engine mode: per-call override → env var → default (host).
+
+    Falls back to HOST if API mode requested but no ANTHROPIC_API_KEY is set.
+    """
+    if per_call and per_call.lower() in ("host", "api"):
+        mode = EngineMode(per_call.lower())
+    else:
+        raw = os.environ.get("EMOTION_MCP_MODE", "host").lower()
+        mode = EngineMode(raw) if raw in ("host", "api") else EngineMode.HOST
+
+    if mode == EngineMode.API and not os.environ.get("ANTHROPIC_API_KEY"):
+        mode = EngineMode.HOST
+
+    return mode
 
 
 # ─── LLM Configuration ──────────────────────────────────────────────────────
@@ -153,6 +202,240 @@ class StyleVector(BaseModel):
     def to_dict(self) -> dict[str, int]:
         """Export as {axis_name: int_value}."""
         return {a: getattr(self, a) for a in STYLE_AXIS_NAMES}
+
+
+# ─── Session Management ─────────────────────────────────────────────────────
+
+# Default "attractor" vector for adaptive mode — slightly warm, otherwise neutral
+DEFAULT_ADAPTIVE_TARGET: dict[str, int] = {
+    "warmth": +1, "formality": 0, "playfulness": 0,
+    "assertiveness": 0, "expressiveness": 0,
+}
+
+# Emotions that trigger automatic switch to de-escalation mode
+DEFAULT_TRIGGER_EMOTIONS: set[str] = {"anger", "disgust", "fear"}
+
+# How many consecutive calm turns before switching back to adaptive
+DE_ESCALATION_COOLDOWN_TURNS = 2
+
+
+class SessionMode(str, Enum):
+    ADAPTIVE = "adaptive"
+    DE_ESCALATION = "de_escalation"
+
+
+class SessionConfig(BaseModel):
+    """Per-session configuration. All fields have defaults for zero-config usage."""
+    model_config = ConfigDict(extra="forbid")
+
+    adaptive_target: dict[str, int] = Field(
+        default_factory=lambda: dict(DEFAULT_ADAPTIVE_TARGET),
+        description="Target attractor vector for adaptive mode",
+    )
+    adaptive_speed: float = Field(
+        default=0.3, ge=0.0, le=1.0,
+        description="Fraction of distance to move toward attractor each turn (0=no shift, 1=instant)",
+    )
+    de_escalation_shifts: dict[str, int] = Field(
+        default_factory=lambda: dict(DEFAULT_DE_ESCALATION_SHIFTS),
+        description="Per-axis additive shifts for de-escalation mode",
+    )
+    de_escalation_emotion_triggers: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_TRIGGER_EMOTIONS),
+        description="Emotions that trigger de-escalation mode",
+    )
+    de_escalation_axis_threshold: int = Field(
+        default=1, ge=0, le=2,
+        description="A or E value that (combined with trigger emotion) activates de-escalation",
+    )
+    timeout_seconds: int = Field(
+        default=3600, ge=60,
+        description="Session expiry timeout in seconds",
+    )
+    max_history: int = Field(
+        default=200, ge=10,
+        description="Max turns to keep in history (oldest trimmed)",
+    )
+
+
+class HistoryEntry(BaseModel):
+    """Single turn recorded in session history."""
+    role: str
+    emotion: str
+    style_vector: dict[str, int]
+    text_preview: str = ""
+    timestamp: float
+
+
+class SessionState(BaseModel):
+    """Full state for a conversation session."""
+    session_id: str
+    mode: SessionMode = SessionMode.ADAPTIVE
+    config: SessionConfig = Field(default_factory=SessionConfig)
+    history: list[HistoryEntry] = Field(default_factory=list)
+    current_target: dict[str, int] = Field(
+        default_factory=lambda: dict(DEFAULT_ADAPTIVE_TARGET),
+    )
+    created_at: float
+    last_activity: float
+    turn_count: int = 0
+    _calm_streak: int = 0  # consecutive calm turns (for cooldown)
+
+
+# Module-level session store
+_sessions: dict[str, SessionState] = {}
+
+
+def _create_session(
+    session_id: str, config: SessionConfig | None = None,
+) -> SessionState:
+    """Create and store a new session."""
+    now = time.time()
+    cfg = config or SessionConfig()
+    session = SessionState(
+        session_id=session_id,
+        config=cfg,
+        current_target=dict(cfg.adaptive_target),
+        created_at=now,
+        last_activity=now,
+    )
+    _sessions[session_id] = session
+    return session
+
+
+def _get_session(session_id: str) -> SessionState | None:
+    """Get session if it exists and hasn't expired."""
+    session = _sessions.get(session_id)
+    if session is None:
+        return None
+    if time.time() - session.last_activity > session.config.timeout_seconds:
+        del _sessions[session_id]
+        return None
+    return session
+
+
+def _get_or_create_session(session_id: str) -> SessionState:
+    """Get existing session or create a new one."""
+    session = _get_session(session_id)
+    if session is None:
+        session = _create_session(session_id)
+    return session
+
+
+def _cleanup_expired_sessions() -> int:
+    """Remove expired sessions. Returns count removed."""
+    now = time.time()
+    expired = [
+        sid for sid, s in _sessions.items()
+        if now - s.last_activity > s.config.timeout_seconds
+    ]
+    for sid in expired:
+        del _sessions[sid]
+    return len(expired)
+
+
+def _record_turn(
+    session: SessionState, role: str, style_vector: dict[str, int],
+    emotion: str, text_preview: str = "",
+) -> None:
+    """Record a turn in session history."""
+    session.history.append(HistoryEntry(
+        role=role, emotion=emotion, style_vector=style_vector,
+        text_preview=text_preview[:100], timestamp=time.time(),
+    ))
+    session.turn_count += 1
+    session.last_activity = time.time()
+    # Trim history if needed
+    if len(session.history) > session.config.max_history:
+        session.history = session.history[-session.config.max_history:]
+
+
+def _determine_mode(
+    session: SessionState, user_emotion: str, user_vector: dict[str, int],
+) -> SessionMode:
+    """Determine operating mode based on user's current emotional state."""
+    triggers = set(session.config.de_escalation_emotion_triggers)
+    threshold = session.config.de_escalation_axis_threshold
+
+    is_triggered = (
+        user_emotion.lower() in triggers
+        and (
+            user_vector.get("assertiveness", 0) >= threshold
+            or user_vector.get("expressiveness", 0) >= threshold
+        )
+    )
+
+    if is_triggered:
+        session._calm_streak = 0
+        return SessionMode.DE_ESCALATION
+
+    # If currently in de-escalation, require cooldown before switching back
+    if session.mode == SessionMode.DE_ESCALATION:
+        session._calm_streak += 1
+        if session._calm_streak >= DE_ESCALATION_COOLDOWN_TURNS:
+            session._calm_streak = 0
+            return SessionMode.ADAPTIVE
+        return SessionMode.DE_ESCALATION
+
+    return SessionMode.ADAPTIVE
+
+
+def _compute_adaptive_target(
+    session: SessionState, user_vector: dict[str, int],
+) -> dict[str, int]:
+    """Compute target vector for adaptive mode.
+
+    Blends between user's current style and the session's attractor,
+    moving adaptive_speed fraction of the distance each turn.
+    """
+    speed = session.config.adaptive_speed
+    attractor = session.config.adaptive_target
+    target: dict[str, int] = {}
+    for axis in STYLE_AXIS_NAMES:
+        user_val = user_vector.get(axis, 0)
+        attr_val = attractor.get(axis, 0)
+        blended = user_val + speed * (attr_val - user_val)
+        target[axis] = _clamp_axis(round(blended))
+    return target
+
+
+def _compute_session_target(
+    session: SessionState, user_vector: dict[str, int], user_emotion: str,
+) -> dict[str, int]:
+    """Compute target vector using session state and mode logic."""
+    session.mode = _determine_mode(session, user_emotion, user_vector)
+
+    if session.mode == SessionMode.DE_ESCALATION:
+        target = _compute_target_vector(
+            user_vector, session.config.de_escalation_shifts,
+        )
+    else:
+        target = _compute_adaptive_target(session, user_vector)
+
+    session.current_target = target
+    return target
+
+
+def _session_summary(session: SessionState) -> dict[str, Any]:
+    """Build a JSON-serializable summary of session state."""
+    return {
+        "session_id": session.session_id,
+        "mode": session.mode.value,
+        "turn_count": session.turn_count,
+        "current_target": session.current_target,
+        "config": {
+            "adaptive_target": session.config.adaptive_target,
+            "adaptive_speed": session.config.adaptive_speed,
+            "de_escalation_shifts": session.config.de_escalation_shifts,
+            "de_escalation_emotion_triggers": session.config.de_escalation_emotion_triggers,
+            "de_escalation_axis_threshold": session.config.de_escalation_axis_threshold,
+            "timeout_seconds": session.config.timeout_seconds,
+            "max_history": session.config.max_history,
+        },
+        "history_length": len(session.history),
+        "created_at": session.created_at,
+        "last_activity": session.last_activity,
+    }
 
 
 # ─── Style Vector Validation (LLM output → verified dict) ───────────────────
@@ -579,6 +862,131 @@ Detect sarcasm escalation: P increasing while W decreasing.
 """
 
 
+# ─── Host Mode Prompt Builders ──────────────────────────────────────────────
+# In HOST mode, tools return a structured prompt for the host LLM to execute.
+# The prompt contains the full expertise (5-axis model, rules, session context)
+# so the host LLM produces the analysis in a single pass.
+
+def _host_analyze_prompt(
+    text: str,
+    context: str | None = None,
+    language_hint: str | None = None,
+    session: Any = None,
+) -> str:
+    """Build a self-contained analysis prompt for the host LLM."""
+    parts = [
+        ANALYZE_SYSTEM,
+        "\n---\n",
+    ]
+
+    if session is not None:
+        parts.append(_session_context_block(session))
+
+    if context:
+        parts.append(f"Dialogue context:\n{context}\n\n---\n")
+
+    parts.append(f"Analyze this message:\n\n{text}")
+
+    if language_hint:
+        parts.append(f"\n\nLanguage: {language_hint}")
+
+    return "\n".join(parts)
+
+
+def _host_de_escalate_prompt(
+    user_message: str,
+    draft_response: str,
+    target_dict: dict[str, int],
+    user_style_dict: dict[str, int] | None = None,
+    dialogue_history: str | None = None,
+    preserve_facts: bool = True,
+    session: Any = None,
+) -> str:
+    """Build a self-contained de-escalation prompt for the host LLM.
+
+    Includes analysis + de-escalation + recommendations in one prompt.
+    """
+    target_spec = "\n".join(f"  {a}={target_dict[a]:+d}" for a in STYLE_AXIS_NAMES)
+
+    parts = [
+        DE_ESCALATE_SYSTEM,
+        "\n---\n",
+    ]
+
+    if session is not None:
+        parts.append(_session_context_block(session))
+
+    if user_style_dict is not None:
+        user_spec = " ".join(
+            f"{AXIS_SHORT[a]}={user_style_dict.get(a, 0):+d}" for a in STYLE_AXIS_NAMES
+        )
+        parts.append(f"User's detected style: {user_spec}\n")
+
+    if dialogue_history:
+        parts.append(f"Dialogue history:\n{dialogue_history}\n\n---\n")
+
+    parts.append(
+        f"User's message:\n{user_message}\n\n"
+        f"Draft response to rewrite:\n{draft_response}\n\n"
+        f"TARGET style vector:\n{target_spec}\n\n"
+        f"Preserve facts: {preserve_facts}\n\n"
+        "Also provide:\n"
+        "1. Brief analysis of the user's emotional state\n"
+        "2. Explanation of why each style axis was shifted\n"
+        "3. Recommendations for continuing the conversation"
+    )
+
+    return "\n".join(parts)
+
+
+def _host_evaluate_prompt(
+    messages: list[Any],
+    session: Any = None,
+) -> str:
+    """Build a self-contained dialogue evaluation prompt for the host LLM."""
+    text = "\n".join(f"{m.role}: {m.text}" for m in messages)
+
+    parts = [
+        EVALUATE_SYSTEM,
+        "\n---\n",
+    ]
+
+    if session is not None:
+        parts.append(_session_context_block(session))
+
+    parts.append(f"Analyze this dialogue:\n\n{text}")
+
+    return "\n".join(parts)
+
+
+def _session_context_block(session: Any) -> str:
+    """Format session state as context for host LLM prompts."""
+    sv = session.current_target
+    target_str = " ".join(
+        f"{AXIS_SHORT[a]}={sv.get(a, 0):+d}" for a in STYLE_AXIS_NAMES
+    )
+    lines = [
+        "## Session Context\n",
+        f"Mode: {session.mode.value}",
+        f"Turn: {session.turn_count}",
+        f"Current target vector: {target_str}",
+    ]
+
+    # Last few turns for context
+    recent = session.history[-5:] if session.history else []
+    if recent:
+        lines.append("\nRecent history:")
+        for entry in recent:
+            sv_str = " ".join(
+                f"{AXIS_SHORT[a]}={entry.style_vector.get(a, 0):+d}"
+                for a in STYLE_AXIS_NAMES
+            )
+            lines.append(f"  [{entry.role}] {entry.emotion} | {sv_str}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 # ─── LLM Client ─────────────────────────────────────────────────────────────
 
 _async_client: anthropic.AsyncAnthropic | None = None
@@ -663,6 +1071,15 @@ class AnalyzeInput(BaseModel):
     language_hint: str | None = Field(
         default=None, description="ISO 639-1 code (e.g. 'en', 'ru')", max_length=5,
     )
+    session_id: str | None = Field(
+        default=None,
+        description="Session ID for stateful tracking. Omit for stateless operation.",
+        max_length=128,
+    )
+    mode: str | None = Field(
+        default=None,
+        description="Engine mode: 'host' (prompt for host LLM, default) or 'api' (direct API call).",
+    )
     response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
 
 
@@ -677,16 +1094,28 @@ class AnalyzeInput(BaseModel):
 async def emotion_analyze(params: AnalyzeInput) -> str:
     """Analyze emotional tone and 5-axis style vector of a message.
 
+    In HOST mode: returns a structured prompt for the host LLM to execute.
+    In API mode: calls LLM API directly and returns parsed results.
+
     Returns emotion category (Ekman), 5-axis style vector (W/F/P/A/E, each -2..+2),
     detected style label, explanation, and trigger words.
-
-    Args:
-        params: text, optional context, language_hint, response_format
-
-    Returns:
-        Analysis with emotion, style_vector, triggers (JSON or Markdown)
     """
-    # Build prompt: optional context → main text → optional language hint
+    engine = _resolve_mode(params.mode)
+
+    # Resolve session (needed for both modes)
+    session = None
+    if params.session_id is not None:
+        _cleanup_expired_sessions()
+        session = _get_or_create_session(params.session_id)
+
+    # HOST mode — return structured prompt for the host LLM
+    if engine == EngineMode.HOST:
+        prompt = _host_analyze_prompt(
+            params.text, params.context, params.language_hint, session,
+        )
+        return prompt
+
+    # API mode — call LLM directly, parse and validate
     prompt = f"Analyze this message:\n\n{params.text}"
     if params.context:
         prompt = f"Dialogue context:\n{params.context}\n\n---\n\n{prompt}"
@@ -702,6 +1131,19 @@ async def emotion_analyze(params: AnalyzeInput) -> str:
     except Exception as e:
         return json.dumps({"error": f"Analysis failed: {type(e).__name__}: {e}"})
 
+    # Session tracking (API mode only — in host mode, host manages flow)
+    if session is not None:
+        _record_turn(
+            session, "user", data["style_vector"],
+            data["emotion"], params.text,
+        )
+        data["session"] = {
+            "session_id": session.session_id,
+            "mode": session.mode.value,
+            "turn_count": session.turn_count,
+        }
+
+    data["engine"] = engine.value
     return _format_analyze(data, params.response_format)
 
 
@@ -722,10 +1164,19 @@ class DeEscalateInput(BaseModel):
     )
     target_style: StyleVector | None = Field(
         default=None,
-        description="Explicit target style override. If omitted, auto-computed via de-escalation rules.",
+        description="Explicit target style override. If omitted, auto-computed via session/de-escalation rules.",
     )
     preserve_facts: bool = Field(
         default=True, description="Preserve all factual content",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Session ID for stateful tracking. Omit for stateless operation.",
+        max_length=128,
+    )
+    mode: str | None = Field(
+        default=None,
+        description="Engine mode: 'host' (prompt for host LLM, default) or 'api' (direct API call).",
     )
     response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
 
@@ -741,34 +1192,67 @@ class DeEscalateInput(BaseModel):
 async def emotion_de_escalate(params: DeEscalateInput) -> str:
     """Rewrite a response to match target 5-axis style, breaking feedback loops.
 
-    Auto mode: analyzes user's style vector, applies shifts (W+1, F+1, A-1, E-1, P→0).
+    In HOST mode: returns a self-contained prompt that includes analysis +
+    de-escalation + recommendations for the host LLM to execute in one pass.
+    In API mode: calls LLM API directly (two calls: analyze + rewrite).
+
+    Auto mode: analyzes user's style, applies shifts (W+1, F+1, A-1, E-1, P→0).
     Override mode: caller provides explicit target_style vector.
-
-    Args:
-        params: user_message, draft_response, optional target_style/history
-
-    Returns:
-        Rewritten text + user/original/target/achieved style vectors + change log
     """
-    # Phase 1: determine target vector
+    engine = _resolve_mode(params.mode)
+
+    # Resolve session
+    session: SessionState | None = None
+    if params.session_id is not None:
+        _cleanup_expired_sessions()
+        session = _get_or_create_session(params.session_id)
+
+    # Compute target vector (needed for both modes)
     user_style_dict: dict[str, int] | None = None
+    user_emotion: str = "neutral"
 
     if params.target_style is not None:
         target_dict = params.target_style.to_dict()
     else:
-        # Auto mode — analyze user's style, then apply de-escalation shifts
-        try:
-            raw_a = await _llm_call(
-                ANALYZE_SYSTEM, f"Analyze this message:\n\n{params.user_message}",
-            )
-            analysis = _parse_json_response(raw_a)
-            analysis = _validate_analysis_response(analysis)
-            user_style_dict = analysis["style_vector"]
-        except Exception:
-            user_style_dict = {a: 0 for a in STYLE_AXIS_NAMES}
-        target_dict = _compute_target_vector(user_style_dict)
+        # Use default de-escalation shifts for target computation
+        # In API mode, will also analyze user's style via LLM
+        if engine == EngineMode.HOST:
+            # In host mode, use default shifts — the host LLM will do the analysis
+            default_user = {a: 0 for a in STYLE_AXIS_NAMES}
+            if session is not None:
+                target_dict = _compute_session_target(session, default_user, "neutral")
+            else:
+                target_dict = _compute_target_vector(default_user)
+        else:
+            # API mode — analyze user's style first
+            try:
+                raw_a = await _llm_call(
+                    ANALYZE_SYSTEM, f"Analyze this message:\n\n{params.user_message}",
+                )
+                analysis = _parse_json_response(raw_a)
+                analysis = _validate_analysis_response(analysis)
+                user_style_dict = analysis["style_vector"]
+                user_emotion = analysis.get("emotion", "neutral")
+            except Exception:
+                user_style_dict = {a: 0 for a in STYLE_AXIS_NAMES}
 
-    # Phase 2: build rewrite prompt
+            if session is not None:
+                target_dict = _compute_session_target(
+                    session, user_style_dict, user_emotion,
+                )
+            else:
+                target_dict = _compute_target_vector(user_style_dict)
+
+    # HOST mode — return self-contained prompt
+    if engine == EngineMode.HOST:
+        prompt = _host_de_escalate_prompt(
+            params.user_message, params.draft_response, target_dict,
+            user_style_dict, params.dialogue_history, params.preserve_facts,
+            session,
+        )
+        return prompt
+
+    # API mode — call LLM, parse, validate
     target_spec = "\n".join(f"  {a}={target_dict[a]:+d}" for a in STYLE_AXIS_NAMES)
     prompt = (
         f"User's message:\n{params.user_message}\n\n"
@@ -779,7 +1263,6 @@ async def emotion_de_escalate(params: DeEscalateInput) -> str:
     if params.dialogue_history:
         prompt = f"Dialogue history:\n{params.dialogue_history}\n\n---\n\n{prompt}"
 
-    # Phase 3: call LLM, validate, attach computed vectors
     try:
         raw = await _llm_call(DE_ESCALATE_SYSTEM, prompt)
         data = _parse_json_response(raw)
@@ -792,6 +1275,24 @@ async def emotion_de_escalate(params: DeEscalateInput) -> str:
     except Exception as e:
         return json.dumps({"error": f"De-escalation failed: {type(e).__name__}: {e}"})
 
+    # Session tracking (API mode)
+    if session is not None:
+        if user_style_dict is not None:
+            _record_turn(
+                session, "user", user_style_dict,
+                user_emotion, params.user_message,
+            )
+        _record_turn(
+            session, "bot", data.get("result_style_vector", target_dict),
+            "neutral", data.get("rewritten_text", "")[:100],
+        )
+        data["session"] = {
+            "session_id": session.session_id,
+            "mode": session.mode.value,
+            "turn_count": session.turn_count,
+        }
+
+    data["engine"] = engine.value
     return _format_de_escalate(data, params.response_format)
 
 
@@ -804,6 +1305,15 @@ class EvaluateDialogueInput(BaseModel):
     messages: list[DialogueMessage] = Field(
         ..., description="Chronological dialogue messages",
         min_length=2, max_length=100,
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Session ID for stateful tracking. Omit for stateless operation.",
+        max_length=128,
+    )
+    mode: str | None = Field(
+        default=None,
+        description="Engine mode: 'host' (prompt for host LLM, default) or 'api' (direct API call).",
     )
     response_format: ResponseFormat = Field(default=ResponseFormat.JSON)
 
@@ -826,15 +1336,26 @@ class EvaluateDialogueInput(BaseModel):
 async def emotion_evaluate_dialogue(params: EvaluateDialogueInput) -> str:
     """Evaluate emotional dynamics and style evolution of a full dialogue.
 
+    In HOST mode: returns a structured prompt for the host LLM.
+    In API mode: calls LLM API directly and returns parsed results.
+
     Per-message: emotion + 5-axis style vector + style label.
     Overall: trend, quality, feedback loop risk, style dynamics, recommendations.
-
-    Args:
-        params: messages list, response_format
-
-    Returns:
-        Table of per-message vectors, trend analysis, recommendations
     """
+    engine = _resolve_mode(params.mode)
+
+    # Resolve session
+    session = None
+    if params.session_id is not None:
+        _cleanup_expired_sessions()
+        session = _get_or_create_session(params.session_id)
+
+    # HOST mode — return structured prompt
+    if engine == EngineMode.HOST:
+        prompt = _host_evaluate_prompt(params.messages, session)
+        return prompt
+
+    # API mode — call LLM directly
     text = "\n".join(f"{m.role}: {m.text}" for m in params.messages)
     message_count = len(params.messages)
 
@@ -847,7 +1368,197 @@ async def emotion_evaluate_dialogue(params: EvaluateDialogueInput) -> str:
     except Exception as e:
         return json.dumps({"error": f"Evaluation failed: {type(e).__name__}: {e}"})
 
+    # Session tracking (API mode)
+    if session is not None:
+        for i, ma in enumerate(data.get("message_analyses", [])):
+            msg = params.messages[i] if i < len(params.messages) else None
+            _record_turn(
+                session, ma.get("role", "user"), ma.get("style_vector", {}),
+                ma.get("emotion", "neutral"),
+                msg.text if msg else "",
+            )
+        data["session"] = {
+            "session_id": session.session_id,
+            "mode": session.mode.value,
+            "turn_count": session.turn_count,
+        }
+
+    data["engine"] = engine.value
     return _format_dialogue(data, params.response_format)
+
+
+# ── Tool 4: Session Create ──
+
+class SessionCreateInput(BaseModel):
+    """Input for creating a new session."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    session_id: str = Field(
+        ..., description="Unique session identifier", min_length=1, max_length=128,
+    )
+    config: SessionConfig | None = Field(
+        default=None,
+        description="Custom session configuration. Omit for defaults.",
+    )
+
+
+@mcp.tool(
+    name="session_create",
+    annotations={
+        "title": "Create Emotional Tracking Session",
+        "readOnlyHint": False, "destructiveHint": False,
+        "idempotentHint": False, "openWorldHint": False,
+    },
+)
+async def session_create(params: SessionCreateInput) -> str:
+    """Create a new session for stateful emotional tracking.
+
+    Sessions track style vectors over time and automatically switch between
+    adaptive mode (gradual shift toward positive) and de-escalation mode
+    (corrective shifts when user is agitated).
+
+    Custom config allows tuning: target attractor, shift speed, trigger thresholds.
+    """
+    _cleanup_expired_sessions()
+    existing = _get_session(params.session_id)
+    if existing is not None:
+        return json.dumps({
+            "error": f"Session '{params.session_id}' already exists. Use session_reset to clear it.",
+            "session": _session_summary(existing),
+        }, indent=2, ensure_ascii=False)
+
+    session = _create_session(params.session_id, params.config)
+    return json.dumps({
+        "status": "created",
+        "session": _session_summary(session),
+    }, indent=2, ensure_ascii=False)
+
+
+# ── Tool 5: Session Get ──
+
+class SessionGetInput(BaseModel):
+    """Input for retrieving session state."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    session_id: str = Field(
+        ..., description="Session ID to retrieve", min_length=1, max_length=128,
+    )
+    include_history: bool = Field(
+        default=False, description="Include full turn history in response",
+    )
+
+
+@mcp.tool(
+    name="session_get",
+    annotations={
+        "title": "Get Session State",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": False,
+    },
+)
+async def session_get(params: SessionGetInput) -> str:
+    """Get current state of an emotional tracking session.
+
+    Returns mode, config, turn count, current target vector, and optionally full history.
+    """
+    _cleanup_expired_sessions()
+    session = _get_session(params.session_id)
+    if session is None:
+        return json.dumps({"error": f"Session '{params.session_id}' not found or expired"})
+
+    result = _session_summary(session)
+    if params.include_history:
+        result["history"] = [
+            {
+                "role": e.role, "emotion": e.emotion,
+                "style_vector": e.style_vector,
+                "text_preview": e.text_preview,
+            }
+            for e in session.history
+        ]
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+# ── Tool 6: Session Reset ──
+
+class SessionResetInput(BaseModel):
+    """Input for resetting a session."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    session_id: str = Field(
+        ..., description="Session ID to reset", min_length=1, max_length=128,
+    )
+    keep_config: bool = Field(
+        default=True, description="Keep custom config (True) or reset to defaults (False)",
+    )
+
+
+@mcp.tool(
+    name="session_reset",
+    annotations={
+        "title": "Reset Session",
+        "readOnlyHint": False, "destructiveHint": True,
+        "idempotentHint": True, "openWorldHint": False,
+    },
+)
+async def session_reset(params: SessionResetInput) -> str:
+    """Reset a session: clear history and turn count, revert to adaptive mode.
+
+    With keep_config=True, preserves custom configuration.
+    With keep_config=False, resets everything to defaults.
+    """
+    _cleanup_expired_sessions()
+    session = _get_session(params.session_id)
+    if session is None:
+        return json.dumps({"error": f"Session '{params.session_id}' not found or expired"})
+
+    config = session.config if params.keep_config else None
+    _create_session(params.session_id, config)
+    new_session = _sessions[params.session_id]
+
+    return json.dumps({
+        "status": "reset",
+        "session": _session_summary(new_session),
+    }, indent=2, ensure_ascii=False)
+
+
+# ── Tool 7: Session Configure ──
+
+class SessionConfigureInput(BaseModel):
+    """Input for updating session configuration."""
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    session_id: str = Field(
+        ..., description="Session ID to configure", min_length=1, max_length=128,
+    )
+    config: SessionConfig = Field(
+        ..., description="New session configuration",
+    )
+
+
+@mcp.tool(
+    name="session_configure",
+    annotations={
+        "title": "Configure Session Settings",
+        "readOnlyHint": False, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": False,
+    },
+)
+async def session_configure(params: SessionConfigureInput) -> str:
+    """Update session configuration: target vectors, shift speed, thresholds.
+
+    Creates the session if it doesn't exist.
+    """
+    _cleanup_expired_sessions()
+    session = _get_or_create_session(params.session_id)
+    session.config = params.config
+    session.current_target = dict(params.config.adaptive_target)
+    session.last_activity = time.time()
+
+    return json.dumps({
+        "status": "configured",
+        "session": _session_summary(session),
+    }, indent=2, ensure_ascii=False)
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────
