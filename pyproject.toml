@@ -9,6 +9,15 @@ authors = [
     { name = "ilyajob05" },
 ]
 keywords = ["mcp", "chatbot", "de-escalation", "emotional-analysis", "customer-support", "dialogue-strategy", "nlp", "spacy"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "mcp>=1.0.0",
     "anthropic>=0.40.0",
@@ -16,6 +25,12 @@ dependencies = [
     "httpx>=0.27.0",
     "spacy>=3.8.11",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ilyajob05/emo_bot"
+Repository = "https://github.com/ilyajob05/emo_bot"
+Issues = "https://github.com/ilyajob05/emo_bot/issues"
+Documentation = "https://github.com/ilyajob05/emo_bot#readme"
 
 [project.optional-dependencies]
 nlp = [
