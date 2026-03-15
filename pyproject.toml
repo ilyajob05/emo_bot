@@ -1,6 +1,6 @@
 [project]
 name = "emotional-deescalation-mcp"
-version = "0.4.3"
+version = "0.4.4"
 description = "MCP server for emotional analysis, de-escalation, and strategic dialogue management in customer support"
 readme = "README.md"
 license = "MIT"
