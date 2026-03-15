@@ -31,36 +31,62 @@ Controlled via `EMOTION_MCP_MODE` env var or per-call `mode` parameter on each t
 
 ## Architecture
 
-All code lives in `server.py`. Seven MCP tools are exposed via `FastMCP`:
+### Legacy tools (server.py)
 
-**Analysis tools:**
+Original single-file MCP server with tonal analysis tools:
+
 - **`emotion_analyze`** — classifies emotion (Ekman) + 5-axis style vector
-- **`emotion_de_escalate`** — rewrites a draft response to match a target style vector; session-aware or stateless
-- **`emotion_evaluate_dialogue`** — evaluates a full dialogue: per-message vectors, trend, feedback loop risk, recommendations
+- **`emotion_de_escalate`** — rewrites a draft response to match a target style vector
+- **`emotion_evaluate_dialogue`** — evaluates a full dialogue: per-message vectors, trend, feedback loop risk
+- **`session_create/get/reset/configure`** — stateful session management
 
-**Session management tools:**
-- **`session_create`** — create a stateful emotional tracking session with optional custom config
-- **`session_get`** — retrieve session state (mode, config, turn count, history)
-- **`session_reset`** — clear session history, optionally keep custom config
-- **`session_configure`** — update session settings (target vectors, shift speed, thresholds)
+### Phase 1: Strategic dialogue management (src/)
 
-All analysis tools accept optional `session_id` for stateful tracking. Without it, they work statelessly (backward-compatible).
+New tools focused on **dialogue strategy**, not just tone correction:
 
-**Session modes:**
-- **Adaptive** (default) — mirrors user's style, gradually shifts toward a positive attractor vector (`adaptive_speed` fraction per turn)
-- **De-escalation** — auto-activates on trigger emotions (anger/disgust/fear) + high A or E; applies stronger corrective shifts; cooldown before returning to adaptive
+- **`strategy_suggest`** — deterministic pattern detection + strategy recommendation (no LLM needed)
 
-Key internal components:
+Located in `src/` package:
+- `src/models.py` — Pydantic models (DialogueMessage, StrategySuggestInput, StrategyResult, DetectedPattern, etc.)
+- `src/pattern_detector.py` — deterministic pattern detectors (repeated questions, escalation, legal threats, churn, human requests)
+- `src/strategy_rules.py` — maps detected patterns to actionable strategies with anti-patterns and escalation thresholds
+- `src/tools/strategy_suggest.py` — MCP tool wrapper
+- `src/server.py` — standalone FastMCP server for new tools only
+
+The `strategy_suggest` tool is also registered in the legacy `server.py` for backward compatibility.
+
+### Key design decisions
+
+- `strategy_suggest` is **fully deterministic** — no LLM calls, works offline, fast and predictable
+- All new tools are **stateless** — dialogue history passed as parameters, no in-memory sessions
+- Pattern detection uses **spaCy lemmatization** (ru_core_news_sm) + POS-based content word extraction + optional sentence embeddings via external service
+- Keyword lists use **lemma forms** — one entry covers all inflected forms (e.g. "жалоба" matches "жалобу", "жалобой", "жалобы")
+- Strategy rules use a priority system: legal_threat > human_request > repeated_contact > repeated_question > no_progress > churn_signal > emotion_escalation
+
+### NLP integration (`src/nlp/`)
+- `spacy_singleton.py` — singleton spaCy loader, lemmatize(), lemma_set(), content_word_set(), contains_any_lemma()
+- `clients.py` — async HTTP client for external NLP service (embeddings + emotion), with circuit breaker and fallback
+- `config.py` — environment variables for NLP services (NLP_SERVICE_URL, timeouts, circuit breaker settings, model names)
+
+### External NLP service (`nlp_service/`)
+- FastAPI app serving sentence embeddings and emotion classification
+- Models: `multilingual-e5-base` (embeddings), two emotion models routed by language:
+  - RU: `cointegrated/rubert-tiny2-cedr-emotion-detection` (~30MB, 6 Ekman emotions)
+  - EN: `j-hartmann/emotion-english-distilroberta-base` (~82MB, 7 Ekman emotions)
+- `/emotion` endpoint accepts `language` param ("ru"/"en") to route to the correct model
+- Config: `NLP_EMOTION_MODEL_RU`, `NLP_EMOTION_MODEL_EN` env vars (see `src/nlp/config.py`)
+- Endpoints: `POST /embed`, `POST /emotion`, `GET /health`
+- Runs in Docker, all models pre-downloaded at build time
+- **Optional** — MCP server works without it, falling back to spaCy-only detection
+
+### Legacy internal components
 - `EngineMode` — HOST (prompt generation) or API (direct LLM call)
 - `StyleVector` (Pydantic model) — validated 5-axis vector, each axis integer -2 to +2
-- `SessionState` / `SessionConfig` — in-memory session storage with auto-expiry
-- `_host_analyze_prompt()` / `_host_de_escalate_prompt()` / `_host_evaluate_prompt()` — build self-contained prompts for host LLM
-- `_compute_session_target()` — orchestrates mode detection and target vector computation
-- `_compute_adaptive_target()` — blends user style toward attractor at configurable speed
-- `_compute_target_vector()` — applies de-escalation shifts to a user's detected style
 - `_llm_call()` — async Anthropic client (API mode only)
 - `_parse_json_response()` — strips markdown fences from LLM output before JSON parsing
 
 ## Dependencies
 
-Python >=3.11. Key packages: `mcp`, `anthropic`, `pydantic`, `httpx`. Managed with `uv` (see `uv.lock`).
+Python >=3.11. Key packages: `mcp`, `anthropic`, `pydantic`, `httpx`, `spacy`. Managed with `uv` (see `uv.lock`).
+
+spaCy model: `ru_core_news_sm` (install via `uv pip install ru_core_news_sm@https://github.com/explosion/spacy-models/releases/download/ru_core_news_sm-3.8.0/ru_core_news_sm-3.8.0-py3-none-any.whl`)

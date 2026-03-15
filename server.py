@@ -62,6 +62,9 @@ import anthropic
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
+from src.models import StrategySuggestInput
+from src.tools.strategy_suggest import strategy_suggest as _strategy_suggest_impl
+
 
 # ─── Domain Constants ────────────────────────────────────────────────────────
 
@@ -901,6 +904,7 @@ def _host_de_escalate_prompt(
     dialogue_history: str | None = None,
     preserve_facts: bool = True,
     session: Any = None,
+    language_hint: str | None = None,
 ) -> str:
     """Build a self-contained de-escalation prompt for the host LLM.
 
@@ -935,6 +939,9 @@ def _host_de_escalate_prompt(
         "2. Explanation of why each style axis was shifted\n"
         "3. Recommendations for continuing the conversation"
     )
+
+    if language_hint:
+        parts.append(f"\n\nLanguage: {language_hint}")
 
     return "\n".join(parts)
 
@@ -1169,6 +1176,9 @@ class DeEscalateInput(BaseModel):
     preserve_facts: bool = Field(
         default=True, description="Preserve all factual content",
     )
+    language_hint: str | None = Field(
+        default=None, description="ISO 639-1 code (e.g. 'en', 'ru')", max_length=5,
+    )
     session_id: str | None = Field(
         default=None,
         description="Session ID for stateful tracking. Omit for stateless operation.",
@@ -1248,7 +1258,7 @@ async def emotion_de_escalate(params: DeEscalateInput) -> str:
         prompt = _host_de_escalate_prompt(
             params.user_message, params.draft_response, target_dict,
             user_style_dict, params.dialogue_history, params.preserve_facts,
-            session,
+            session, params.language_hint,
         )
         return prompt
 
@@ -1260,6 +1270,8 @@ async def emotion_de_escalate(params: DeEscalateInput) -> str:
         f"TARGET style vector:\n{target_spec}\n\n"
         f"Preserve facts: {params.preserve_facts}"
     )
+    if params.language_hint:
+        prompt += f"\n\nLanguage: {params.language_hint}"
     if params.dialogue_history:
         prompt = f"Dialogue history:\n{params.dialogue_history}\n\n---\n\n{prompt}"
 
@@ -1559,6 +1571,32 @@ async def session_configure(params: SessionConfigureInput) -> str:
         "status": "configured",
         "session": _session_summary(session),
     }, indent=2, ensure_ascii=False)
+
+
+# ─── Strategy Suggest (Phase 1 — deterministic) ─────────────────────────────
+
+@mcp.tool(
+    name="strategy_suggest",
+    annotations={
+        "title": "Suggest Dialogue Strategy",
+        "readOnlyHint": True, "destructiveHint": False,
+        "idempotentHint": True, "openWorldHint": False,
+    },
+)
+async def strategy_suggest(params: StrategySuggestInput) -> str:
+    """Analyze dialogue patterns and suggest a strategy for the next bot response.
+
+    Detects problematic patterns (repeated questions, escalation, legal threats,
+    churn signals) and recommends concrete actions, anti-patterns, and escalation
+    thresholds. Fully deterministic — no LLM calls, works offline.
+
+    Input: dialogue_history (required), user_metadata, available_actions,
+    bot_capabilities, language.
+
+    Output: recommended_strategy, reasoning, action_sequence, anti_patterns,
+    escalation thresholds, detected_patterns.
+    """
+    return await _strategy_suggest_impl(params)
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────────────

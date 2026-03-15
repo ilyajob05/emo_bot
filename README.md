@@ -1,8 +1,44 @@
 # Emotional De-escalation MCP Server v2
 
-Universal MCP server for emotional tone analysis and de-escalation using a **5-axis communication style model**.
+MCP server for **strategic dialogue management** and emotional de-escalation in customer support bots.
+
+The core problem: support bots get stuck in loops — asking for an order number 5 times, repeating the same apology, ignoring escalation signals. This server detects these patterns and tells the bot **what to do next** — change strategy, escalate to a human operator, or stop repeating itself.
+
+**Key capability: deterministic escalation detection.** The `strategy_suggest` tool identifies 7 problem patterns (repeated questions, legal threats, churn signals, requests for a human, emotional escalation, no progress, repeated contacts) and recommends concrete actions — including when to escalate to a human operator. Works without LLM calls, offline, instant.
 
 Based on: [Mistakes to Avoid When Developing Chatbots for User Support](https://medium.com/@ilyajob05/mistakes-to-avoid-when-developing-chatbots-for-user-support-5eefa21256ab)
+
+## Strategic Dialogue Management
+
+The MVP covers 80% of problematic support scenarios **without any LLM calls**. The deterministic engine uses spaCy lemmatization and pattern matching to detect problems and recommend strategies:
+
+### Detected Patterns
+
+| Pattern | What it detects | Escalation |
+|---------|----------------|------------|
+| **repeated_question** | Bot asked the same question 2+ times | After 4 repetitions |
+| **legal_threat** | User mentions lawsuits, regulators, lawyers | Immediate |
+| **human_request** | User explicitly asks for a live agent | Immediate |
+| **churn_signal** | User threatens to cancel, leave, or demands refund | After 1 more turn |
+| **emotion_escalation** | User's emotional intensity is increasing | After 2 more turns |
+| **no_progress** | Both sides repeating themselves, dialogue stuck | After 4 stagnant turns |
+| **repeated_contact** | User's Nth contact today (via metadata) | After 3rd contact |
+
+### Escalation to Human Operator
+
+The server provides clear, actionable escalation signals:
+
+- **`should_escalate_now: true`** — transfer immediately (legal threats, explicit human requests, 4+ repeated questions, 3+ contacts today)
+- **`escalate_after_n_more_turns: N`** — escalate if not resolved within N turns
+- **Priority system** ensures the most critical pattern drives the strategy: legal_threat > human_request > repeated_contact > repeated_question > no_progress > churn_signal > emotion_escalation
+
+### Anti-Patterns
+
+The engine tracks what the bot has already said and generates "do NOT" rules:
+- "Do NOT ask for order number again" (if asked 2+ times)
+- "Do NOT use 'I understand your frustration' — already said 2 times"
+- "Do NOT argue with the customer about their rights" (on legal threats)
+- "Do NOT say 'calm down'" (on emotional escalation)
 
 ## 5-Axis Communication Style Model
 
@@ -65,6 +101,60 @@ export EMOTION_MCP_MODE=api
 ```
 
 ## Tools
+
+### Strategic Tools
+
+#### `strategy_suggest`
+
+**Call this BEFORE composing a reply.** Analyzes dialogue patterns and recommends what to do next. Fully deterministic — no LLM, works offline, instant.
+
+```json
+{
+  "dialogue_history": [
+    {"role": "user", "text": "Где мой заказ?"},
+    {"role": "bot", "text": "Уточните номер заказа."},
+    {"role": "user", "text": "Я уже говорил! Уточните по телефону!"},
+    {"role": "bot", "text": "Подскажите номер заказа, пожалуйста."},
+    {"role": "user", "text": "Да что с вами не так?! Позовите оператора!"}
+  ],
+  "available_actions": ["lookup_by_phone", "escalate_to_human"],
+  "user_metadata": {"total_contacts_today": 2},
+  "language": "ru"
+}
+```
+
+Example response:
+```json
+{
+  "recommended_strategy": "comply_with_human_request",
+  "reasoning": "Пользователь явно запросил живого оператора. Попытки продолжить диалог ботом ухудшат ситуацию.",
+  "action_sequence": [
+    {"action": "escalate_to_human", "priority": "required", "note": "Пользователь явно попросил оператора — выполнить без промедления."}
+  ],
+  "anti_patterns": [
+    "НЕ спрашивать номер заказа снова — бот уже спрашивал 2 раза",
+    "НЕ говорить 'успокойтесь' или 'не нервничайте'"
+  ],
+  "escalation": {
+    "should_escalate_now": true,
+    "escalate_after_n_more_turns": null,
+    "reason": "Пользователь явно запросил живого оператора"
+  },
+  "detected_patterns": ["human_request", "repeated_question", "emotion_escalation"]
+}
+```
+
+**Strategies by pattern:**
+
+| Pattern | Strategy | Key action |
+|---------|----------|------------|
+| repeated_question | alternative_identification | Try phone/email lookup instead |
+| legal_threat | immediate_supervisor_escalation | Transfer to supervisor now |
+| human_request | comply_with_human_request | Transfer to operator now |
+| churn_signal | retention | Offer compensation, connect manager |
+| emotion_escalation | de_escalation | Slow down, validate emotions |
+| no_progress | break_deadlock | Summarize and escalate |
+| repeated_contact | priority_handling | Acknowledge, prioritize |
 
 ### Analysis Tools
 
@@ -194,6 +284,12 @@ claude mcp add emotional-deescalation -- uvx emotional-deescalation-mcp
 claude
 ```
 
+**If You Need Update MCP**
+```bash
+uv cache clean emotional-deescalation-mcp
+claude mcp remove emotional-deescalation
+claude mcp add emotional-deescalation -- uvx emotional-deescalation-mcp@latest
+```
 That's it! The tools are now available in your Claude Code session. You can ask Claude to analyze messages, de-escalate responses, or evaluate dialogues.
 
 ### Claude Desktop
@@ -270,18 +366,56 @@ MCP Client (Claude Desktop, Claude Code, LM Studio, any MCP host)
     │ stdio
     ▼
 emotional_deescalation_mcp
+    ├── strategy_suggest             ── Strategic tool (deterministic, no LLM)
+    │       │
+    │       ├── Pattern detection (spaCy lemmatization)
+    │       └── Strategy rules engine
+    │
     ├── emotion_analyze             ─┐
     ├── emotion_de_escalate          ├── Analysis tools (accept mode + session_id)
     ├── emotion_evaluate_dialogue   ─┘
+    │       │
+    │       ├── HOST mode: structured prompt → host LLM (free)
+    │       └── API mode: Anthropic Claude API (paid)
+    │
     ├── session_create              ─┐
     ├── session_get                  ├── Session management
     ├── session_reset                │
     └── session_configure           ─┘
-            │
-            ├── HOST mode: returns structured prompt → host LLM executes (free)
-            │
-            └── API mode: calls LLM directly → Anthropic Claude API (paid)
+
+    Optional: External NLP Service (nlp_service/)
+    ├── POST /embed    ── sentence embeddings (multilingual-e5-base)
+    ├── POST /emotion  ── emotion classification (RU + EN models, routed by language)
+    └── GET  /health
 ```
+
+## NLP Service (Optional)
+
+An external FastAPI service for sentence embeddings and emotion classification. The MCP server works without it (falls back to spaCy-only detection), but the NLP service improves quality via semantic similarity and ML-based emotion classification.
+
+**Emotion models (two specialized, routed by language):**
+- **Russian:** `cointegrated/rubert-tiny2-cedr-emotion-detection` (~30MB, 6 Ekman emotions, F1=0.83)
+- **English:** `j-hartmann/emotion-english-distilroberta-base` (~82MB, 7 Ekman emotions)
+
+**Embedding model:** `intfloat/multilingual-e5-base` (RU + EN sentence embeddings)
+
+```bash
+# Run with Docker
+cd nlp_service
+docker build -t nlp-service .
+docker run -p 8100:8100 nlp-service
+
+# Or override models at build time
+docker build \
+  --build-arg NLP_EMOTION_MODEL_RU=your/ru-model \
+  --build-arg NLP_EMOTION_MODEL_EN=your/en-model \
+  -t nlp-service .
+```
+
+Configure via environment variables:
+- `NLP_SERVICE_URL` — default `http://localhost:8100`
+- `NLP_EMOTION_MODEL_RU`, `NLP_EMOTION_MODEL_EN` — override emotion models
+- `NLP_EMBED_MODEL` — override embedding model
 
 ## License
 

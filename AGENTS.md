@@ -11,12 +11,50 @@ All analysis tools accept optional `mode` ("host"/"api") to override the default
 
 ## When to use
 
+- **Before composing any reply** in a multi-turn support dialogue → `strategy_suggest` (prevents loops, detects escalation, recommends next action)
 - User message shows strong emotion (anger, sarcasm, despair) → `emotion_analyze`
 - You are drafting a reply to an emotional user → `emotion_de_escalate`
 - You need to assess how a conversation is evolving → `emotion_evaluate_dialogue`
 - You need to track emotional state across a multi-turn conversation → `session_create` + pass `session_id` to tools
 
-## Analysis Tools
+## Strategic Tools (Phase 1)
+
+### `strategy_suggest`
+
+**Call this BEFORE composing a reply.** Analyzes dialogue patterns and recommends what to do next. Fully deterministic — no LLM, works offline, instant.
+
+```json
+{
+  "dialogue_history": [
+    {"role": "user", "text": "Где мой заказ?"},
+    {"role": "bot", "text": "Уточните номер заказа."},
+    {"role": "user", "text": "Доставьте уже! Третий раз пишу!"}
+  ],
+  "available_actions": ["lookup_by_phone", "escalate_to_human"],
+  "user_metadata": {"total_contacts_today": 2},
+  "language": "ru"
+}
+```
+
+Optional: `user_metadata` (contacts_today, vip, previous_tickets), `available_actions` (what the bot can do), `bot_capabilities`, `language` ("ru"/"en", default "ru").
+
+Returns:
+- `recommended_strategy` — what approach to take (e.g. "alternative_identification", "immediate_supervisor_escalation")
+- `action_sequence` — ordered steps with priorities ("required"/"primary"/"fallback")
+- `anti_patterns` — what NOT to do (e.g. "НЕ спрашивать номер заказа снова", "НЕ использовать 'понимаю ваше раздражение' — уже было 2 раза")
+- `escalation` — whether to escalate now, or after N more turns
+- `detected_patterns` — what problems were found (repeated_question, emotion_escalation, legal_threat, churn_signal, human_request, no_progress, repeated_contact)
+
+**Detected patterns (deterministic):**
+- `repeated_question` — bot asked same question 2+ times
+- `emotion_escalation` — user intensity increasing
+- `legal_threat` — user mentions lawsuits, regulators, lawyers
+- `churn_signal` — user threatens to cancel/leave
+- `human_request` — user explicitly asks for a human agent
+- `no_progress` — dialogue stuck, both sides repeating
+- `repeated_contact` — user's Nth contact today
+
+## Analysis Tools (Legacy)
 
 All accept optional `session_id` (for stateful tracking) and `mode` ("host"/"api").
 
@@ -118,10 +156,12 @@ Patterns: sarcasm = W-2 P+2, aggression = W-2 A+2 E+2, passive-aggression = W-1 
 
 ## Usage patterns
 
+**Recommended (strategic)** — after each user message, call `strategy_suggest` with the full dialogue history → follow `action_sequence` and respect `anti_patterns` when composing your reply → optionally run `emotion_de_escalate` on the draft for tonal polish.
+
 **Reactive** — user is upset → `emotion_analyze` → if intensity >= 1, run `emotion_de_escalate` on your draft before sending.
 
 **Proactive** — after several exchanges → `emotion_evaluate_dialogue` → check `feedback_loop_risk`; if medium/high, de-escalate next reply.
 
 **One-shot** — skip `emotion_analyze`, go straight to `emotion_de_escalate` with your draft (it includes analysis + de-escalation + recommendations in one call).
 
-**Stateful** — `session_create` at conversation start → pass `session_id` to every tool call → server tracks emotional dynamics and adapts de-escalation strategy automatically (gradual shift toward positive in adaptive mode, stronger corrections when triggered).
+**Stateful** — `session_create` at conversation start → pass `session_id` to every tool call → server tracks emotional dynamics and adapts de-escalation strategy automatically.
