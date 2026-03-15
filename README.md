@@ -1,5 +1,7 @@
 # Emotional De-escalation MCP Server v2
 
+[Русская версия](README.ru.md)
+
 MCP server for **strategic dialogue management** and emotional de-escalation in customer support bots.
 
 The core problem: support bots get stuck in loops — asking for an order number 5 times, repeating the same apology, ignoring escalation signals. This server detects these patterns and tells the bot **what to do next** — change strategy, escalate to a human operator, or stop repeating itself.
@@ -359,6 +361,10 @@ Place an `.mcp.json` file in the root of your project so that Claude Code automa
 
 For LLM agents connecting via MCP: see **[AGENTS.md](AGENTS.md)** — a compact instruction file designed to minimize context window usage while providing all necessary tool selection and invocation guidance.
 
+## Production Integration
+
+For connecting to a corporate system (REST API, database, escalation service): see **[Integration Guide](docs/integration_guide.md)** — covers bot response format, escalation signals, third-party MCP server setup (PostgreSQL, custom order management), and step-by-step deployment instructions.
+
 ## Architecture
 
 ```
@@ -416,6 +422,16 @@ Configure via environment variables:
 - `NLP_SERVICE_URL` — default `http://localhost:8100`
 - `NLP_EMOTION_MODEL_RU`, `NLP_EMOTION_MODEL_EN` — override emotion models
 - `NLP_EMBED_MODEL` — override embedding model
+
+## Using with Context7
+
+[Context7](https://context7.com) provides up-to-date documentation for LLMs and AI code editors. Once this library is indexed, any LLM agent with Context7 MCP can instantly access the full documentation — tools, parameters, usage patterns, and integration guides.
+
+See **[Context7 Setup Guide](docs/context7-setup.md)** for configuration instructions.
+
+## Contributing
+
+Want to add a new pattern detector, strategy, or language support? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — quick setup, clear guide for adding new detectors, no red tape.
 
 ## License
 

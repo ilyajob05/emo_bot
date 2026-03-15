@@ -1,0 +1,55 @@
+flowchart TD
+    A[User Message] --> B[strategy_suggest]
+
+    B --> C{should_escalate_now?}
+
+    C -->|Yes| D[Escalate to Human Operator]
+    D --> D1["Send to user: 'Transferring to a specialist...'"]
+    D1 --> D2["[SYSTEM] Escalation context for operator"]
+
+    C -->|No| E{Needs order data?}
+
+    E -->|Yes| F[order_lookup]
+    F --> G[Compose Reply]
+
+    E -->|No| G
+
+    G --> H{emotion_escalation detected?}
+
+    H -->|Yes| I[emotion_de_escalate]
+    I --> J[Send Reply to User]
+
+    H -->|No| J
+
+    J --> K["[SYSTEM] Log tool results"]
+    K --> L[Wait for next message]
+    L --> A
+
+    %% strategy_suggest details
+    B -.->|returns| B1["recommended_strategy
+    action_sequence
+    anti_patterns
+    escalation
+    detected_patterns"]
+
+    %% Detected patterns
+    B1 -.-> P1["Patterns:
+    repeated_question
+    legal_threat
+    human_request
+    churn_signal
+    emotion_escalation
+    no_progress
+    repeated_contact"]
+
+    style A fill:#4A90D9,color:#fff
+    style D fill:#E74C3C,color:#fff
+    style D1 fill:#E74C3C,color:#fff
+    style D2 fill:#E74C3C,color:#fff
+    style F fill:#27AE60,color:#fff
+    style I fill:#F39C12,color:#fff
+    style J fill:#4A90D9,color:#fff
+    style B fill:#8E44AD,color:#fff
+    style B1 fill:#D5B8E8,color:#333
+    style P1 fill:#FADBD8,color:#333
+    style K fill:#BDC3C7,color:#333

@@ -17,6 +17,13 @@ NLP_MAX_RETRIES: int = int(os.environ.get("NLP_MAX_RETRIES", "1"))
 NLP_CIRCUIT_BREAKER_THRESHOLD: int = int(os.environ.get("NLP_CIRCUIT_BREAKER_THRESHOLD", "5"))
 NLP_CIRCUIT_BREAKER_RESET: float = float(os.environ.get("NLP_CIRCUIT_BREAKER_RESET", "30.0"))
 
+# ─── Embedding backend ────────────────────────────────────────────────────
+
+# Options: "nlp_service" (default), "lmstudio" (OpenAI-compatible /v1/embeddings)
+NLP_EMBED_BACKEND: str = os.environ.get("NLP_EMBED_BACKEND", "nlp_service")
+LM_STUDIO_URL: str = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
+LM_STUDIO_EMBED_MODEL: str = os.environ.get("LM_STUDIO_EMBED_MODEL", "")
+
 # ─── Model names ─────────────────────────────────────────────────────────────
 
 NLP_EMBED_MODEL: str = os.environ.get("NLP_EMBED_MODEL", "intfloat/multilingual-e5-base")

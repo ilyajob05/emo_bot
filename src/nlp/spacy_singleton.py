@@ -3,11 +3,16 @@ spaCy singleton loader and text processing utilities.
 
 Provides lemmatization, POS-based content word extraction,
 and lemma-aware keyword matching for Russian and English.
+
+The spaCy model is auto-downloaded on first use if not installed.
 """
 
 from __future__ import annotations
 
-import os
+import logging
+import shutil
+import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 import spacy
@@ -18,17 +23,76 @@ if TYPE_CHECKING:
 
 from .config import SPACY_MODEL
 
+logger = logging.getLogger(__name__)
 
 # ─── Singleton ────────────────────────────────────────────────────────────────
 
 _nlp: Language | None = None
 
+_SPACY_MODEL_URLS = {
+    "ru_core_news_sm": (
+        "https://github.com/explosion/spacy-models/releases/download/"
+        "ru_core_news_sm-3.8.0/ru_core_news_sm-3.8.0-py3-none-any.whl"
+    ),
+}
+
+
+def _build_install_commands() -> list[list[str]]:
+    """Build list of install commands to try, in priority order."""
+    url = _SPACY_MODEL_URLS.get(SPACY_MODEL)
+    package = url if url else SPACY_MODEL
+    commands = []
+
+    # 1. Try uv (preferred in uv-managed environments)
+    uv_path = shutil.which("uv")
+    if uv_path:
+        commands.append([uv_path, "pip", "install", "--python", sys.executable, package])
+
+    # 2. Try pip as module
+    commands.append([sys.executable, "-m", "pip", "install", package])
+
+    # 3. Try spacy download as last resort
+    commands.append([sys.executable, "-m", "spacy", "download", SPACY_MODEL])
+
+    return commands
+
+
+def _install_model() -> None:
+    """Download and install the spaCy model.
+
+    Tries uv pip, pip, and spacy download in order.
+    """
+    logger.warning("spaCy model '%s' not found, installing...", SPACY_MODEL)
+
+    last_error = None
+    for cmd in _build_install_commands():
+        try:
+            logger.info("Trying: %s", " ".join(cmd[:4]) + " ...")
+            subprocess.run(cmd, capture_output=True, text=True, check=True)
+            logger.info("spaCy model '%s' installed successfully", SPACY_MODEL)
+            return
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            last_error = e
+            continue
+
+    raise OSError(
+        f"Can't find model '{SPACY_MODEL}' and auto-install failed. "
+        f"Install manually: python -m spacy download {SPACY_MODEL}"
+    ) from last_error
+
 
 def get_nlp() -> Language:
-    """Load and return the spaCy model (singleton, loaded once)."""
+    """Load and return the spaCy model (singleton, loaded once).
+
+    Auto-downloads the model if not installed.
+    """
     global _nlp
     if _nlp is None:
-        _nlp = spacy.load(SPACY_MODEL)
+        try:
+            _nlp = spacy.load(SPACY_MODEL)
+        except OSError:
+            _install_model()
+            _nlp = spacy.load(SPACY_MODEL)
     return _nlp
 
 

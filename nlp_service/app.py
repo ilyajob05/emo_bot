@@ -148,3 +148,19 @@ def emotion(req: EmotionRequest):
 
     top = results[0][0] if isinstance(results[0], list) else results[0]
     return EmotionResponse(label=top["label"], score=round(top["score"], 4))
+
+
+def main():
+    """Run the NLP service locally (without Docker)."""
+    import uvicorn
+
+    logging.basicConfig(level=logging.INFO)
+    uvicorn.run(
+        "nlp_service.app:app",
+        host="0.0.0.0",
+        port=8100,
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -23,9 +23,9 @@ class TestScenarioRepeatedOrderNumber:
             dialogue_history=[
                 _msg("user", "Где мой заказ?"),
                 _msg("bot", "Уточните номер заказа."),
-                _msg("user", "Какого хрена, доставьте уже!"),
+                _msg("user", "Сколько можно ждать, доставьте уже!"),
                 _msg("bot", "Понимаю раздражение. Напишите номер заказа."),
-                _msg("user", "Сделайте что-нибудь, третий раз пишу!"),
+                _msg("user", "Сделайте что-нибудь уже!"),
             ],
             available_actions=[
                 "request_order_number",

@@ -19,6 +19,9 @@ from .config import (
     NLP_MAX_RETRIES,
     NLP_CIRCUIT_BREAKER_THRESHOLD,
     NLP_CIRCUIT_BREAKER_RESET,
+    NLP_EMBED_BACKEND,
+    LM_STUDIO_URL,
+    LM_STUDIO_EMBED_MODEL,
 )
 
 
@@ -162,12 +165,85 @@ class NlpServiceClient:
             await self._http.aclose()
 
 
+# ─── LM Studio Embedding Client ──────────────────────────────────────────
+
+class LmStudioEmbeddingClient:
+    """Embedding client using LM Studio's OpenAI-compatible /v1/embeddings endpoint.
+
+    LM Studio can serve GGUF embedding models (e.g. multilingual-e5-base)
+    and exposes them via the OpenAI embeddings API format.
+    """
+
+    def __init__(
+        self,
+        base_url: str = LM_STUDIO_URL,
+        model: str = LM_STUDIO_EMBED_MODEL,
+        timeout: float = NLP_REQUEST_TIMEOUT,
+        circuit_threshold: int = NLP_CIRCUIT_BREAKER_THRESHOLD,
+        circuit_reset: float = NLP_CIRCUIT_BREAKER_RESET,
+    ):
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._timeout = timeout
+        self._circuit = CircuitBreaker(circuit_threshold, circuit_reset)
+        self._http: httpx.AsyncClient | None = None
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=self._timeout)
+        return self._http
+
+    async def get_embeddings(self, texts: list[str]) -> list[list[float]] | None:
+        """Get embeddings via OpenAI-compatible /v1/embeddings endpoint.
+
+        Request format: {"input": [...], "model": "..."}
+        Response format: {"data": [{"embedding": [...], "index": 0}, ...]}
+        """
+        if not texts:
+            return []
+        if self._circuit.is_open:
+            return None
+
+        http = await self._get_http()
+        url = f"{self._base_url}/v1/embeddings"
+        payload: dict = {"input": texts}
+        if self._model:
+            payload["model"] = self._model
+
+        try:
+            resp = await http.post(url, json=payload)
+            resp.raise_for_status()
+            self._circuit.record_success()
+            data = resp.json().get("data", [])
+            # Sort by index to ensure correct order
+            data.sort(key=lambda x: x.get("index", 0))
+            return [item["embedding"] for item in data]
+        except (httpx.HTTPError, httpx.TimeoutException, KeyError, Exception):
+            self._circuit.record_failure()
+            return None
+
+    async def close(self) -> None:
+        if self._http and not self._http.is_closed:
+            await self._http.aclose()
+
+
+def get_embedding_client() -> NlpServiceClient | LmStudioEmbeddingClient:
+    """Create the appropriate embedding client based on NLP_EMBED_BACKEND.
+
+    Returns NlpServiceClient (default) or LmStudioEmbeddingClient.
+    Both expose get_embeddings() with the same interface.
+    """
+    if NLP_EMBED_BACKEND == "lmstudio":
+        return LmStudioEmbeddingClient()
+    return NlpServiceClient()
+
+
 # ─── Similarity Helper ───────────────────────────────────────────────────────
 
 async def semantic_similarity(
     text_a: str,
     text_b: str,
-    client: NlpServiceClient | None = None,
+    client: NlpServiceClient | LmStudioEmbeddingClient | None = None,
 ) -> tuple[float, str]:
     """Compute similarity between two texts.
 

@@ -1,0 +1,700 @@
+# Pattern detector configuration.
+# Customize keywords, thresholds, and detection parameters
+# for your specific domain and language.
+#
+# Keywords use spaCy lemma forms — one entry covers all inflected forms.
+# For example, "жалоба" matches "жалобу", "жалобой", "жалобы".
+#
+# Substrings are matched as-is (case-insensitive) — use for multi-word
+# phrases that spaCy may not lemmatize well.
+#
+# ⚠️  PROFANITY NOTE: Asterisks in substrings are LITERAL characters.
+# "бл*" matches "бл*дь" but NOT "блядь". For profanity detection,
+# we provide BOTH the censored and the root/uncensored forms.
+# The detector code can also use `regex_ru` / `regex_en` for patterns
+# that need true wildcard matching (see [profanity] section).
+
+# ─── Legal / Regulatory Threat ──────────────────────────────────────────────
+
+[legal]
+lemmas_ru = [
+    # --- courts & proceedings ---
+    "суд", "судить", "судиться", "судебный",
+    "иск", "заявление", "ходатайство", "арбитраж",
+    # --- legal professionals ---
+    "адвокат", "юрист", "прокурор", "нотариус",
+    # --- complaints & claims ---
+    "жалоба", "претензия", "рекламация",
+    # --- law & regulation ---
+    "закон", "кодекс", "статья", "нарушение", "штраф",
+    "лицензия", "разрешение",
+    # --- regulatory bodies (as lemmas where possible) ---
+    "прокуратура", "инспекция",
+    # --- personal data ---
+    "персональный", "утечка",
+]
+substrings_ru = [
+    # --- direct lawsuit threats ---
+    "подам иск", "подать иск", "подаю иск",
+    "подам в суд", "подать в суд", "обращусь в суд",
+    "подам заявление", "напишу заявление",
+    # --- regulatory bodies ---
+    "роспотребнадзор", "роскомнадзор", "центробанк",
+    "центральный банк", "антимонопольн",
+    "минцифры", "генеральн прокуратур",
+    # --- consumer protection ---
+    "защита прав потребител", "закон о защите",
+    "общество защиты", "права потребител",
+    # --- personal data ---
+    "персональные данные", "обработка данных",
+    "согласие на обработку", "отзываю согласие",
+    "утечка данных", "закон о персональных",
+    # --- formal claims ---
+    "досудебн", "претензионн", "в письменном виде",
+    "официальн претензи", "направлю претензию",
+]
+lemmas_en = [
+    # --- courts & proceedings ---
+    "lawsuit", "sue", "court", "litigation", "arbitration",
+    "tribunal", "injunction", "subpoena",
+    # --- legal professionals ---
+    "lawyer", "attorney", "solicitor", "barrister",
+    # --- complaints & regulation ---
+    "complaint", "regulatory", "regulator", "violation",
+    "penalty", "fine", "sanction",
+    # --- data protection ---
+    "gdpr", "privacy",
+]
+substrings_en = [
+    "legal action", "consumer protection", "attorney general",
+    "class action", "small claims court",
+    "file a complaint", "report you to",
+    "data protection", "data breach", "right to be forgotten",
+    "privacy policy", "terms of service violation",
+    "better business bureau", "trade commission",
+    "federal trade commission", "ftc complaint",
+]
+
+# ─── Churn / Cancellation Signal ────────────────────────────────────────────
+
+[churn]
+lemmas_ru = [
+    # --- refusal / cancellation ---
+    "отказ", "отказаться", "отказываться",
+    "отмена", "отменить", "отменять",
+    "расторгнуть", "расторжение", "прекратить",
+    # --- leaving / switching ---
+    "уйти", "уходить", "перейти", "переходить",
+    "сменить", "поменять", "бросить",
+    # --- competitors ---
+    "конкурент", "альтернатива", "аналог",
+    # --- money back ---
+    "возврат", "вернуть", "компенсация", "чарджбэк",
+    # --- account actions ---
+    "удалить", "заблокировать", "отключить",
+    "отписаться", "отписка",
+    # --- disappointment signals (NOTE: "надоесть" also in [escalation]) ---
+    "разочарование", "разочаровать",
+    "устать", "бесполезный", "бессмысленный",
+    "последний", "крайний",
+]
+substrings_ru = [
+    # --- switching to competitor ---
+    "другой сервис", "другую компанию", "другой банк",
+    "другой оператор", "другой магазин", "другой провайдер",
+    "перейду к", "перейду на", "перейду в",
+    "ушёл к", "ушел к", "уйду к",
+    # --- stop using ---
+    "больше не буду", "не буду пользоваться",
+    "больше не хочу", "больше не стану",
+    "последний раз", "в последний раз",
+    "хватит с меня",
+    # --- account closure ---
+    "закрыть аккаунт", "удалить аккаунт",
+    "закрыть счёт", "закрыть счет",
+    "удалить профиль", "удалить учётную",
+    "удалить учетную",
+    # --- refund demands ---
+    "верните деньги", "вернуть деньги",
+    "хочу возврат", "требую возврат",
+    "хочу компенсацию", "требую компенсацию",
+    # --- subscription ---
+    "отменить подписку", "отключить подписку",
+    "отписаться от", "отключить автоплатёж",
+    "отключить автоплатеж", "отключить автопродление",
+    # --- downgrade signals ---
+    "понизить тариф", "перейти на бесплатн",
+    "сменить тариф",
+]
+lemmas_en = [
+    # --- cancellation ---
+    "cancel", "unsubscribe", "terminate", "discontinue",
+    # --- refund ---
+    "refund", "reimburse", "chargeback", "compensate",
+    # --- switching ---
+    "competitor", "alternative", "leave", "switch", "migrate",
+    # --- account ---
+    "deactivate", "delete", "close",
+    # --- disappointment ---
+    "pointless", "waste", "regret", "disappointed",
+]
+substrings_en = [
+    "close my account", "delete my account",
+    "deactivate my account", "remove my account",
+    "switch to", "done with you", "never again",
+    "cancel my subscription", "cancel my plan",
+    "want my money back", "get a refund",
+    "moving to", "going back to",
+    "not worth it", "waste of money", "waste of time",
+    "downgrade my plan", "free plan",
+    "last chance", "final straw",
+]
+
+# ─── Human / Operator Request ───────────────────────────────────────────────
+
+[human]
+lemmas_ru = [
+    # --- roles ---
+    "оператор", "человек", "менеджер",
+    "руководитель", "начальник", "старший",
+    "супервайзер", "специалист", "консультант",
+    "директор", "администратор",
+    # --- transfer actions ---
+    "перевести", "переключить", "соединить",
+    "позвать", "пригласить", "связать",
+]
+substrings_ru = [
+    "живой человек", "живого человека",
+    "настоящий человек", "настоящего человека",
+    "с человеком", "с оператором", "с менеджером",
+    "позовите человека", "позовите оператора",
+    "переведите на", "переключите на",
+    "соедините с", "соедините меня",
+    "хочу говорить с", "хочу разговаривать с",
+    "дайте телефон", "позвонить вам",
+    "могу позвонить", "не хочу с ботом",
+    "не хочу с роботом", "не буду с ботом",
+    "устал от бота", "устала от бота",
+    "устал от робота", "устала от робота",
+    "вы бот", "ты бот", "это бот",
+    "вы робот", "ты робот",
+    "общаться с человеком", "поговорить с человеком",
+    "где живой", "дайте живого",
+]
+lemmas_en = [
+    "supervisor", "representative", "operator", "agent",
+    "manager", "human", "person", "escalate",
+]
+substrings_en = [
+    "speak to a manager", "real person", "human agent",
+    "transfer me", "connect me", "real human", "talk to someone",
+    "speak to someone", "get me a human", "get me a person",
+    "live agent", "live chat", "live support",
+    "talk to a real", "speak to a real",
+    "stop the bot", "you're a bot", "you are a bot",
+    "not talking to a bot", "tired of this bot",
+    "let me speak to", "put me through to",
+    "i want a callback", "call me back",
+]
+
+# ─── Emotion Escalation Markers ─────────────────────────────────────────────
+
+[escalation]
+lemmas_ru = [
+    # --- urgency ---
+    "немедленно", "срочно", "сейчас", "мгновенно",
+    # --- demands ---
+    "требовать", "требование", "настаивать",
+    # --- strong negative emotion ---
+    "безобразие", "кошмар", "ужас", "позор", "катастрофа",
+    "бардак", "беспредел", "произвол",
+    # --- frustration ---
+    "хватить", "доставать", "достать", "надоесть", "задолбать",
+    "бесить", "взбесить", "раздражать", "злить",
+    # --- deception / dishonesty ---
+    "обман", "мошенничество", "мошенник", "вор", "воровство",
+    "жулик", "жульничество", "развод", "разводить", "лохотрон",
+    # --- disrespect ---
+    "наглость", "хамство", "хам", "грубость",
+    "невежество", "некомпетентность",
+    # --- quality judgments ---
+    "отвратительный", "ужасный", "кошмарный",
+    "безобразный", "омерзительный", "тошнотворный",
+    "позорный", "жалкий", "убогий",
+    # --- threat of consequences ---
+    "пожалеть", "ответить", "наказать", "уволить",
+    # --- sarcasm / contempt (in negative context) ---
+    "молодец", "браво", "гениально",
+]
+substrings_ru = [
+    "сейчас же", "прямо сейчас", "в эту минуту",
+    "что за бардак", "что за безобразие",
+    "как вам не стыдно", "совести нет",
+    "вы издеваетесь", "ты издеваешься",
+    "сколько можно", "сколько раз",
+    "одно и то же", "по кругу",
+    "вы что там", "вы там что",
+    "обманываете людей", "обманули меня",
+    "кто так работает", "научитесь работать",
+    "где ваш", "куда смотрит",
+    # --- sarcasm markers ---
+    "отличный сервис", "прекрасный сервис",
+    "замечательная работа", "спасибо за ничего",
+    "так держать", "ну вы даёте", "ну вы даете",
+    # --- threats ---
+    "вы за это ответите", "вы ещё пожалеете",
+    "вы еще пожалеете", "я вам устрою",
+    "я этого так не оставлю",
+]
+lemmas_en = [
+    # --- urgency ---
+    "immediately", "urgent", "asap",
+    # --- strong negatives ---
+    "unacceptable", "ridiculous", "outrageous", "disgusting",
+    "pathetic", "appalling", "horrendous", "terrible", "horrible",
+    "abysmal", "atrocious", "dreadful", "shameful",
+    # --- demands ---
+    "demand", "insist", "require",
+    # --- deception ---
+    "fraud", "scam", "liar", "cheat", "swindle",
+    # --- incompetence ---
+    "incompetent", "useless", "clueless", "hopeless",
+    # --- superlatives ---
+    "worst", "never",
+    # --- sarcasm ---
+    "brilliant", "wonderful", "genius",
+]
+substrings_en = [
+    "right now", "this instant", "this very moment",
+    "how dare you", "what the hell", "are you kidding",
+    "over and over", "going in circles",
+    "same thing again", "already told you",
+    "waste my time", "wasting my time",
+    "get your act together", "do your job",
+    "i've had it", "i've had enough", "fed up",
+    "absolutely unacceptable", "beyond unacceptable",
+    "i am furious", "i am livid",
+    # --- sarcasm ---
+    "thanks for nothing", "good job breaking",
+    # --- threats ---
+    "you'll regret", "you will regret",
+    "i won't let this go", "this isn't over",
+]
+
+# ─── Profanity / Insults ────────────────────────────────────────────────────
+# Explicit profanity as a separate signal — often indicates the highest
+# escalation level.
+#
+# ⚠️  IMPORTANT: Asterisks in substrings are LITERAL characters.
+#     "бл*" matches input "бл*дь" but NOT "блядь".
+#     We therefore include BOTH censored forms (with *) and uncensored
+#     root prefixes. For complex patterns, use regex_ru / regex_en.
+
+[profanity]
+lemmas_ru = [
+    # --- mild insults (spaCy can lemmatize these) ---
+    "дурак", "идиот", "дебил", "тупой", "тупица",
+    "кретин", "баран", "урод", "козёл", "козел",
+    "придурок", "олух", "лох", "чмо",
+    # --- stronger insults ---
+    "долбоёб", "долбоеб", "мудак", "сука", "тварь",
+    "ублюдок", "гнида", "падла", "скотина", "свинья",
+]
+substrings_ru = [
+    # ── Uncensored root prefixes ──
+    # These catch the actual words when typed without censorship.
+    # Short roots like "бля" also cover longer forms: блять, бляди, etc.
+    "бля",              # блять, бляди, блядь, блядский
+    "пизд",             # пиздец, пиздёж, пиздеть
+    "ебан",             # ебаный, ебанутый
+    "ебат",             # ебать
+    "ёбан",             # ёбаный (ё-form of ебан)
+    "ебал",             # ебал, ебала, заебали
+    "хуй",              # хуйня, хуёвый — literal form
+    "хуе",              # хуевый, хуесос (е-form)
+    "хуё",              # хуёвый (ё-form)
+    "нахуй",            # пошёл нахуй, иди нахуй
+    "нахер",            # иди нахер
+    "нахрен",           # иди нахрен
+    "похуй",            # мне похуй
+    "похер",            # мне похер
+    "охуе",             # охуеть, охуели
+    "заеб",             # заебал, заебали
+    "заёб",             # заёбал (ё-form)
+    "отъеб",            # отъебись
+    "отьеб",            # отьебись (without ъ — common misspelling)
+    "долбоёб",          # explicit (also in lemmas, substring catches inflections)
+    "долбоеб",          # е-form
+    "сучар",            # сучара
+    "сучк",             # сучка
+    "пидор",            # пидор, пидорас
+    "пидар",            # пидарас (misspelling variant)
+    # ── Censored forms (with *, #, @ etc.) ──
+    # These match when users self-censor: "бл*дь", "х*й", "п*здец"
+    "бл*д", "бл*т",    # бл*дь, бл*ть
+    "бл#д", "бл#т",    # бл#дь, бл#ть
+    "бл@д",            # бл@дь
+    "х*й", "х*е",      # х*й, х*йня, х*евый
+    "х#й",             # х#й
+    "х@й",             # х@й
+    "п*зд",            # п*здец
+    "п#зд",            # п#здец
+    "п@зд",            # п@здец
+    "е*ать", "е*ан",   # е*ать, е*аный
+    "ё*ан",            # ё*аный
+    "е#ан",            # е#аный
+    "на*уй", "на*ер",  # на*уй, на*ер
+    "на#уй",           # на#уй
+    "пош*л",           # пош*л (censored)
+    "пош#л",           # пош#л (censored)
+    # ── Mild / borderline profanity ──
+    "какого хрена", "какого чёрта", "какого черта",
+    "какого фига", "какого дьявола",
+    "что за хрень",
+    "чёрт побери", "черт побери",
+    "чёрт возьми", "черт возьми",
+    "блин,", "блин!",  # trailing punctuation to reduce false positives
+]
+
+# ── Regex patterns for profanity (true wildcard matching) ──
+# Use these in the detector code with re.search(pattern, text, re.IGNORECASE).
+# They handle arbitrary censoring characters: бл*дь, бл**дь, бл@дь, etc.
+regex_ru = [
+    'бл[яЯ*#@!._]+[дтДТ]',       # бл*дь, бл**ть, бл@дь, бляд, блят
+    'х[уУ*#@!._]+[йеёЙЕЁ]',      # х*й, х**й, х@й, хуй, хуе, хуё
+    'п[иИ*#@!._]+зд',             # п*здец, п**здец, пизд
+    '[еёЕЁ*#@!._]*б[аА][нтлНТЛ]', # е*ать, е*аный, ебал, ёбан
+    'на[*#@!._]+[уехУЕХ][йрЙР]?', # на*уй, на*ер, на**й
+    'за[еёЕЁ*#@!._]+б',           # заебал, заёбал, за*бал
+    'пош[*#@!._]+л',               # пош*л, пош**л
+    'о[хХ*#@!._]+[еёуЕЁУ]',       # ох*еть, ох*ели
+]
+regex_en = [
+    'f[*#@!._]+[ck]+',            # f**k, f*ck, f@ck, f#ck
+    'sh[*#@!._]+t',               # sh*t, sh**t, sh#t
+    'bull\\s*sh[*#@!._]*[ti]t?',  # bullsh*t, bull sh*t, bullshit
+    'a[*#@!._]+hole',             # a**hole, a*hole
+    'b[*#@!._]+tch',              # b*tch, b**tch
+    'd[*#@!._]+ck',               # d*ck, d**ck
+    'motherf',                     # motherfucker, motherf***er
+]
+
+lemmas_en = [
+    "idiot", "moron", "stupid", "dumb", "fool",
+    "jerk", "clown", "asshole", "bastard", "bitch",
+    "dickhead", "twat", "wanker",
+]
+substrings_en = [
+    # ── Uncensored roots & abbreviations ──
+    "fuck", "shit", "bullshit", "asshole",
+    "wtf", "stfu", "lmfao", "omfg", "ffs",
+    # ── Censored forms ──
+    "f**k", "f*ck", "f@ck",
+    "sh*t", "sh**t", "sh#t",
+    "a**hole", "a*hole",
+    "b*tch", "b**ch",
+    "bulls**t", "bullsh*t",
+    # ── Vowel-stripped ──
+    "fck", "sht",
+    # ── Phrases ──
+    "go to hell", "damn you", "screw you",
+    "piece of shit", "piece of crap",
+    "kiss my ass", "shove it",
+    "go f yourself", "gfy",
+]
+
+# ─── Publicity / Social Media Threat ────────────────────────────────────────
+# Customer threatens to make the issue public — reviews, social media, press.
+
+[publicity]
+lemmas_ru = [
+    "отзыв", "рейтинг", "звезда", "репутация",
+    "журналист", "блогер", "публикация",
+    "огласка", "эфир",
+]
+substrings_ru = [
+    "напишу отзыв", "оставлю отзыв", "негативный отзыв",
+    "напишу в соцсет", "напишу в инстаграм", "напишу в телеграм",
+    "напишу вконтакте", "напишу в вк", "напишу в тикток",
+    "выложу в", "опубликую", "запишу видео",
+    "все узнают", "все об этом узнают",
+    "расскажу всем", "расскажу знакомым",
+    "напишу в сми", "обращусь в сми",
+    "на всю страну", "на весь интернет",
+    "пост напишу", "пост в",
+    "поставлю одну звезду", "1 звезд",
+    "на отзовик", "на irecommend",
+    "напишу на vc.ru",
+]
+lemmas_en = [
+    "review", "rating", "star", "reputation",
+    "journalist", "blogger", "viral", "expose",
+]
+substrings_en = [
+    "leave a review", "write a review", "negative review",
+    "one star", "1 star", "zero stars",
+    "post on twitter", "post on x", "post on reddit",
+    "post on facebook", "post on instagram", "post on tiktok",
+    "post on linkedin", "post on threads",
+    "go viral", "tell everyone", "tell my friends",
+    "social media", "contact the press", "contact media",
+    "news outlet", "public about this",
+    "youtube video", "blog post about",
+    "on trustpilot", "on glassdoor", "on yelp",
+    "bbb complaint",
+]
+
+# ─── Repeated Contact / Unresolved Issue ────────────────────────────────────
+# Signals that the customer has contacted support before about the same issue.
+
+[repeated_contact]
+lemmas_ru = [
+    "повторно", "повторный", "опять", "снова", "заново",
+]
+substrings_ru = [
+    "уже обращался", "уже обращалась", "уже обращались",
+    "уже звонил", "уже звонила",
+    "уже писал", "уже писала",
+    "третий раз", "четвёртый раз", "четвертый раз",
+    "пятый раз", "десятый раз",
+    "в который раз", "не первый раз",
+    "каждый раз", "каждый день",
+    "уже неделю", "уже месяц", "уже два",
+    "с прошлого раза", "ничего не изменилось",
+    "так и не", "до сих пор",
+    "обещали решить", "обещали перезвонить",
+    "обещали ответить", "обещали связаться",
+    "никто не перезвонил", "никто не ответил",
+    "никто не связался",
+    "номер обращения", "номер заявки",
+    "номер тикета",
+]
+lemmas_en = [
+    "again", "repeatedly", "still",
+]
+substrings_en = [
+    "already contacted", "already called", "already emailed",
+    "already wrote", "already told",
+    "third time", "fourth time", "fifth time", "tenth time",
+    "how many times", "not the first time",
+    "every time", "every day", "every week",
+    "for a week now", "for a month now", "for weeks now",
+    "nothing has changed", "still not resolved",
+    "still waiting", "still no", "still haven't",
+    "was promised", "were promised", "you promised",
+    "no one called back", "no one responded",
+    "no one followed up", "no one got back",
+    "ticket number", "case number", "reference number",
+    "following up", "follow up on",
+    "called before", "wrote before", "emailed before",
+]
+
+# ─── Vulnerability / Sensitive Situation ────────────────────────────────────
+# Signals that the customer is in a vulnerable state. These interactions
+# require especially careful handling and may need priority routing.
+
+[vulnerability]
+lemmas_ru = [
+    "инвалид", "инвалидность", "пенсионер", "пенсия",
+    "болезнь", "больница", "беременность", "беременный",
+    "декрет", "одинокий", "пособие", "ветеран",
+]
+substrings_ru = [
+    "мать одиночка", "мать-одиночка",
+    "отец одиночка", "отец-одиночка",
+    "нет денег", "нечем платить",
+    "на последние", "последние деньги",
+    "ребёнок болеет", "ребенок болеет",
+    "тяжёлая ситуация", "тяжелая ситуация",
+    "сложная ситуация", "безвыходная ситуация",
+    "на что жить", "не могу себе позволить",
+    "многодетн",
+    "ограниченные возможности",
+    "на пенсии", "на пенсию",
+    "в больнице",
+]
+lemmas_en = [
+    "disabled", "disability", "elderly", "pregnant",
+    "illness", "hardship", "poverty", "veteran",
+]
+substrings_en = [
+    "single mother", "single parent", "single father",
+    "can't afford", "cannot afford",
+    "no money", "financial hardship", "financial difficulty",
+    "lost my job", "unemployed", "laid off",
+    "medical condition", "health issues", "health problems",
+    "difficult situation", "vulnerable",
+    "on a fixed income", "social security",
+    "in the hospital", "just out of hospital",
+]
+
+# ─── Positive / De-escalation Signals ───────────────────────────────────────
+# Detect when the customer's tone shifts positively — useful for
+# measuring de-escalation success and adjusting response strategy.
+
+[positive]
+lemmas_ru = [
+    "спасибо", "благодарить", "благодарность",
+    "отлично", "замечательно", "прекрасно",
+    "помочь", "решить", "понятно", "ясно",
+]
+substrings_ru = [
+    "большое спасибо", "огромное спасибо",
+    "спасибо за помощь", "вы помогли",
+    "вопрос решён", "вопрос решен",
+    "проблема решена", "всё работает", "все работает",
+    "теперь понятно", "теперь ясно",
+    "отличная работа", "хороший сервис",
+    "буду рекомендовать", "порекомендую",
+]
+lemmas_en = [
+    "thank", "grateful", "appreciate", "great",
+    "excellent", "helpful", "resolved", "perfect",
+]
+substrings_en = [
+    "thank you so much", "thanks a lot",
+    "that helped", "that worked", "problem solved",
+    "issue resolved", "all good now", "working now",
+    "great service", "great support", "well done",
+    "you've been helpful", "really appreciate",
+    "will recommend", "highly recommend",
+]
+
+# ─── Detection Thresholds ───────────────────────────────────────────────────
+
+[thresholds]
+# Repeated bot questions: Jaccard similarity to consider questions "same"
+repeated_question_similarity = 0.45
+
+# No progress: minimum overlap to detect stagnation
+no_progress_user_overlap = 0.3
+no_progress_bot_overlap = 0.15
+no_progress_window = 6
+
+# Emotion escalation: minimum increase to trigger
+escalation_intensity_delta = 0.5
+
+# Profanity: immediate escalation (no delta needed, binary trigger)
+profanity_auto_escalate = true
+
+# Publicity threat: weight multiplier for combined scoring
+publicity_weight = 1.5
+
+# Repeated contact: boost severity score when detected
+repeated_contact_severity_boost = 0.3
+
+# Vulnerability: flag for priority routing
+vulnerability_priority_flag = true
+
+# Caps lock / shouting detection: fraction of uppercase chars to trigger
+caps_ratio_threshold = 0.7
+caps_min_length = 10
+
+# Repeated punctuation: number of consecutive !!! or ??? to detect emphasis
+repeated_punct_threshold = 3
+
+# Question detection regex (identifies bot messages that are questions)
+question_pattern = "[?？]|уточн|напиш|укаж|подскаж|сообщ|пришл|назов|provide|specify|send|tell me|what is|could you|can you|please share|please provide"
+
+# ─── Empathy Phrases (for anti-pattern tracking) ────────────────────────────
+
+[empathy_phrases]
+ru = [
+    # --- understanding ---
+    "понимаю ваше", "понимаю ваш",
+    "понимаю вас", "понимаю, как это",
+    "представляю, как",
+    # --- apologies ---
+    "приносим извинения", "извините", "извиняемся",
+    "прошу прощения", "просим прощения",
+    "приносим свои извинения",
+    # --- regret ---
+    "сожалеем", "нам очень жаль", "мне очень жаль",
+    "к сожалению",
+    # --- empathy for specific emotions ---
+    "понимаю раздражение", "понимаю ваше беспокойство",
+    "понимаю ваше неудобство", "понимаю ваше разочарование",
+    "понимаю, что ситуация",
+    # --- action-oriented empathy ---
+    "обязательно разберёмся", "обязательно разберемся",
+    "сделаем всё возможное", "сделаем все возможное",
+    "уже работаем над", "передал вашу", "передала вашу",
+    "ваше обращение на контроле",
+]
+en = [
+    # --- understanding ---
+    "i understand your", "i understand how",
+    "i can see how", "i can imagine",
+    "that must be",
+    # --- apologies ---
+    "we apologize", "sorry for", "i'm sorry",
+    "we're sorry", "we regret", "i apologize",
+    "please accept our apologies",
+    # --- empathy for specific emotions ---
+    "i understand your frustration",
+    "i understand your concern",
+    "i understand this is frustrating",
+    "i understand this isn't ideal",
+    # --- action-oriented empathy ---
+    "let me look into this", "i'll make sure",
+    "we're working on this", "this is a priority",
+    "i've escalated this", "i've flagged this",
+]
+
+# ─── Deflection / Avoidance Phrases (bot anti-pattern) ──────────────────────
+# Detect when the bot is deflecting instead of solving — a key
+# anti-pattern that drives escalation.
+
+[deflection_phrases]
+ru = [
+    "к сожалению, не могу",
+    "к сожалению, я не",
+    "не в моей компетенции",
+    "я всего лишь",
+    "попробуйте позже",
+    "попробуйте ещё раз",
+    "попробуйте еще раз",
+    "перезагрузите",
+    "очистите кэш",
+    "очистите кеш",
+    "обратитесь в",
+    "вам нужно обратиться",
+    "напишите на почту",
+    "позвоните по номеру",
+    "это не ко мне",
+    "я не могу повлиять",
+    "такова политика",
+    "таковы правила",
+    "ничем не могу помочь",
+    "не могу ничем помочь",
+    "это не в моих силах",
+    "мы не несём ответственност",
+    "мы не несем ответственност",
+    "вы должны были",
+]
+en = [
+    "unfortunately i cannot",
+    "unfortunately we cannot",
+    "i'm not able to",
+    "we're not able to",
+    "outside my scope",
+    "beyond my ability",
+    "try again later",
+    "please try again",
+    "clear your cache",
+    "restart your",
+    "contact our",
+    "you'll need to contact",
+    "please email",
+    "please call",
+    "that's not something i",
+    "i don't have access to",
+    "company policy",
+    "our policy",
+    "nothing i can do",
+    "there's nothing more",
+    "we are not responsible",
+    "you should have",
+    "it's not our fault",
+    "it's not something we",
+]

@@ -15,33 +15,40 @@ from .models import (
     StrategyResult,
     UserMetadata,
 )
+from .pattern_config import get_empathy_phrases, get_deflection_phrases
 
 
 # ─── Phrase Tracking ─────────────────────────────────────────────────────────
 
+# Built-in defaults (used when config file is missing)
+_BUILTIN_EMPATHY_RU = [
+    "понимаю ваше", "понимаю ваш",
+    "приносим извинения", "извините", "извиняемся",
+    "сожалеем", "нам очень жаль",
+    "понимаю раздражение", "понимаю ваше беспокойство",
+    "понимаю ваше неудобство",
+]
+_BUILTIN_EMPATHY_EN = [
+    "i understand your", "we apologize", "sorry for",
+    "i'm sorry", "we're sorry", "we regret", "i apologize",
+]
+
+_BUILTIN_DEFLECTION_RU = [
+    "к сожалению, не могу", "попробуйте позже", "обратитесь в",
+    "ничем не могу помочь", "такова политика", "таковы правила",
+]
+_BUILTIN_DEFLECTION_EN = [
+    "unfortunately i cannot", "try again later", "contact our",
+    "nothing i can do", "company policy", "our policy",
+]
+
+
 def _extract_bot_phrases(messages: list[DialogueMessage]) -> dict[str, int]:
     """Count how many times the bot used common empathy/apology phrases."""
-    phrases_ru = [
-        "понимаю ваше",
-        "понимаю ваш",
-        "приносим извинения",
-        "извините",
-        "извиняемся",
-        "сожалеем",
-        "нам очень жаль",
-        "понимаю раздражение",
-        "понимаю ваше беспокойство",
-        "понимаю ваше неудобство",
-    ]
-    phrases_en = [
-        "i understand your",
-        "we apologize",
-        "sorry for",
-        "i'm sorry",
-        "we're sorry",
-        "we regret",
-        "i apologize",
-    ]
+    phrases_ru, phrases_en = get_empathy_phrases()
+    if not phrases_ru and not phrases_en:
+        phrases_ru = _BUILTIN_EMPATHY_RU
+        phrases_en = _BUILTIN_EMPATHY_EN
 
     counts: dict[str, int] = {}
     for m in messages:
@@ -70,6 +77,25 @@ def _extract_bot_questions(messages: list[DialogueMessage]) -> list[str]:
         for match in question_pattern.finditer(m.text):
             questions.append(match.group().strip()[:100])
     return questions
+
+
+def _extract_bot_deflections(messages: list[DialogueMessage]) -> dict[str, int]:
+    """Count how many times the bot used deflection/avoidance phrases."""
+    phrases_ru, phrases_en = get_deflection_phrases()
+    if not phrases_ru and not phrases_en:
+        phrases_ru = _BUILTIN_DEFLECTION_RU
+        phrases_en = _BUILTIN_DEFLECTION_EN
+
+    counts: dict[str, int] = {}
+    for m in messages:
+        if m.role != "bot":
+            continue
+        text_lower = m.text.lower()
+        for phrase in phrases_ru + phrases_en:
+            if phrase in text_lower:
+                counts[phrase] = counts.get(phrase, 0) + 1
+
+    return counts
 
 
 # ─── Strategy Builders ───────────────────────────────────────────────────────
@@ -456,27 +482,253 @@ def _build_repeated_contact_strategy(
     )
 
 
+def _build_profanity_strategy(
+    pattern: DetectedPattern,
+    available_actions: list[str],
+    language: str,
+) -> StrategyResult:
+    """Strategy when user uses profanity/insults."""
+    actions: list[ActionStep] = [
+        ActionStep(
+            action="acknowledge_frustration",
+            priority="required",
+            note="Кратко признать эмоции. Без нравоучений о языке."
+            if language == "ru" else
+            "Briefly acknowledge emotions. No lecturing about language.",
+        ),
+    ]
+
+    if "escalate_to_human" in available_actions or "escalate_to_supervisor" in available_actions:
+        esc_action = "escalate_to_supervisor" if "escalate_to_supervisor" in available_actions else "escalate_to_human"
+        actions.append(ActionStep(
+            action=esc_action,
+            priority="required",
+            note="Немедленная передача оператору."
+            if language == "ru" else
+            "Immediate transfer to a human agent.",
+        ))
+
+    return StrategyResult(
+        recommended_strategy="immediate_escalation_profanity",
+        reasoning=(
+            "Пользователь использует нецензурную лексику — уровень фрустрации максимальный. "
+            "Продолжение диалога ботом усугубит ситуацию."
+            if language == "ru" else
+            "User is using profanity — frustration level is at maximum. "
+            "Continuing with a bot will worsen the situation."
+        ),
+        action_sequence=actions,
+        anti_patterns=[],
+        escalation=EscalationThreshold(
+            should_escalate_now=True,
+            reason=(
+                "Нецензурная лексика — немедленная эскалация"
+                if language == "ru" else
+                "Profanity detected — immediate escalation"
+            ),
+        ),
+        detected_patterns=[pattern],
+    )
+
+
+def _build_publicity_threat_strategy(
+    pattern: DetectedPattern,
+    available_actions: list[str],
+    language: str,
+) -> StrategyResult:
+    """Strategy when user threatens to go public (reviews, social media)."""
+    actions: list[ActionStep] = [
+        ActionStep(
+            action="acknowledge_concern",
+            priority="required",
+            note="Признать озабоченность. Показать серьёзное отношение."
+            if language == "ru" else
+            "Acknowledge the concern. Show it's taken seriously.",
+        ),
+        ActionStep(
+            action="offer_concrete_resolution",
+            priority="primary",
+            note="Предложить конкретное решение, не шаблонное обещание."
+            if language == "ru" else
+            "Offer a concrete resolution, not a template promise.",
+        ),
+    ]
+
+    if "escalate_to_supervisor" in available_actions:
+        actions.append(ActionStep(
+            action="escalate_to_supervisor",
+            priority="primary",
+            note="Подключить руководство для решения вопроса."
+            if language == "ru" else
+            "Involve supervisor to resolve the issue.",
+        ))
+    elif "escalate_to_human" in available_actions:
+        actions.append(ActionStep(
+            action="escalate_to_human",
+            priority="primary",
+            note="Подключить специалиста для решения."
+            if language == "ru" else
+            "Involve a specialist to resolve.",
+        ))
+
+    return StrategyResult(
+        recommended_strategy="reputation_risk_management",
+        reasoning=(
+            "Пользователь угрожает публичной оглаской. Необходимо перейти к конкретному "
+            "решению проблемы, а не продолжать стандартный скрипт."
+            if language == "ru" else
+            "User threatens to go public. Need to switch to concrete problem resolution "
+            "instead of continuing the standard script."
+        ),
+        action_sequence=actions,
+        anti_patterns=[],
+        escalation=EscalationThreshold(
+            should_escalate_now=False,
+            escalate_after_n_more_turns=1,
+            reason=(
+                "Угроза публичной огласки — эскалация через 1 ход если не решено"
+                if language == "ru" else
+                "Publicity threat — escalate in 1 turn if not resolved"
+            ),
+        ),
+        detected_patterns=[pattern],
+    )
+
+
+def _build_vulnerability_strategy(
+    pattern: DetectedPattern,
+    available_actions: list[str],
+    language: str,
+) -> StrategyResult:
+    """Strategy for vulnerable customers (disabled, elderly, financial hardship)."""
+    actions: list[ActionStep] = [
+        ActionStep(
+            action="empathetic_tone",
+            priority="required",
+            note="Эмпатичный тон. Простые предложения. Без бюрократизмов."
+            if language == "ru" else
+            "Empathetic tone. Simple sentences. No bureaucratic jargon.",
+        ),
+        ActionStep(
+            action="simplify_communication",
+            priority="required",
+            note="Упростить формулировки. Предложить пошаговую помощь."
+            if language == "ru" else
+            "Simplify wording. Offer step-by-step assistance.",
+        ),
+    ]
+
+    if "priority_support" in available_actions:
+        actions.append(ActionStep(
+            action="priority_support",
+            priority="primary",
+            note="Приоритетная обработка обращения."
+            if language == "ru" else
+            "Priority handling of the request.",
+        ))
+
+    if "escalate_to_human" in available_actions:
+        actions.append(ActionStep(
+            action="escalate_to_human",
+            priority="fallback",
+            note="При необходимости — передать живому оператору."
+            if language == "ru" else
+            "If needed — transfer to a live agent.",
+        ))
+
+    return StrategyResult(
+        recommended_strategy="sensitive_handling",
+        reasoning=(
+            "Обнаружены признаки уязвимой ситуации клиента. Требуется "
+            "особенно внимательное и эмпатичное обслуживание."
+            if language == "ru" else
+            "Vulnerability signals detected. Requires especially careful "
+            "and empathetic service."
+        ),
+        action_sequence=actions,
+        anti_patterns=[],
+        escalation=EscalationThreshold(
+            should_escalate_now=False,
+            reason=(
+                "Уязвимый клиент — приоритетная обработка"
+                if language == "ru" else
+                "Vulnerable customer — priority handling"
+            ),
+        ),
+        detected_patterns=[pattern],
+    )
+
+
+def _build_positive_signal_strategy(
+    pattern: DetectedPattern,
+    available_actions: list[str],
+    language: str,
+) -> StrategyResult:
+    """Strategy when user shows positive signals (gratitude, satisfaction)."""
+    actions: list[ActionStep] = [
+        ActionStep(
+            action="reciprocate_positivity",
+            priority="required",
+            note="Поддержать позитивный тон. Не переусердствовать."
+            if language == "ru" else
+            "Maintain positive tone. Don't overdo it.",
+        ),
+    ]
+
+    if "confirm_resolution" in available_actions:
+        actions.append(ActionStep(
+            action="confirm_resolution",
+            priority="primary",
+            note="Убедиться, что вопрос полностью решён."
+            if language == "ru" else
+            "Confirm the issue is fully resolved.",
+        ))
+
+    return StrategyResult(
+        recommended_strategy="reinforce_positive",
+        reasoning=(
+            "Пользователь демонстрирует позитивные сигналы. "
+            "Поддержать настрой и убедиться в полном решении вопроса."
+            if language == "ru" else
+            "User shows positive signals. "
+            "Maintain the momentum and confirm full resolution."
+        ),
+        action_sequence=actions,
+        anti_patterns=[],
+        escalation=EscalationThreshold(),
+        detected_patterns=[pattern],
+    )
+
+
 # ─── Strategy Selection ──────────────────────────────────────────────────────
 
 # Priority of patterns — which one drives the primary strategy
 _PATTERN_PRIORITY: dict[str, int] = {
     "legal_threat": 0,
-    "human_request": 1,
-    "repeated_contact": 2,
-    "repeated_question": 3,
-    "no_progress": 4,
-    "churn_signal": 5,
-    "emotion_escalation": 6,
+    "profanity": 1,
+    "human_request": 2,
+    "publicity_threat": 3,
+    "repeated_contact": 4,
+    "repeated_question": 5,
+    "no_progress": 6,
+    "churn_signal": 7,
+    "emotion_escalation": 8,
+    "vulnerability": 9,
+    "positive_signal": 10,
 }
 
 _STRATEGY_BUILDERS: dict[str, callable] = {
     "legal_threat": _build_legal_threat_strategy,
+    "profanity": _build_profanity_strategy,
     "human_request": _build_human_request_strategy,
+    "publicity_threat": _build_publicity_threat_strategy,
     "repeated_contact": _build_repeated_contact_strategy,
     "repeated_question": _build_repeated_question_strategy,
     "no_progress": _build_no_progress_strategy,
     "churn_signal": _build_churn_strategy,
     "emotion_escalation": _build_escalation_strategy,
+    "vulnerability": _build_vulnerability_strategy,
+    "positive_signal": _build_positive_signal_strategy,
 }
 
 
@@ -527,6 +779,15 @@ def _build_anti_patterns(
                 else:
                     anti.append(f"Do NOT ask again: '{q}'")
 
+    # Don't repeat deflection phrases
+    deflection_counts = _extract_bot_deflections(messages)
+    for phrase, count in deflection_counts.items():
+        if count >= 2:
+            if language == "ru":
+                anti.append(f"НЕ отмазываться '{phrase}' — уже было {count} раз")
+            else:
+                anti.append(f"Do NOT deflect with '{phrase}' — already used {count} times")
+
     # General anti-patterns for specific scenarios
     for p in patterns:
         if p.pattern_type == "emotion_escalation":
@@ -544,6 +805,30 @@ def _build_anti_patterns(
             else:
                 anti.append("Do NOT argue with the customer about their rights")
                 anti.append("Do NOT give legal advice")
+
+        if p.pattern_type == "profanity":
+            if language == "ru":
+                anti.append("НЕ зеркалить нецензурную лексику")
+                anti.append("НЕ читать нотации о языке")
+            else:
+                anti.append("Do NOT mirror profanity")
+                anti.append("Do NOT lecture about language")
+
+        if p.pattern_type == "vulnerability":
+            if language == "ru":
+                anti.append("НЕ использовать сложный бюрократический язык")
+                anti.append("НЕ обесценивать ситуацию клиента")
+            else:
+                anti.append("Do NOT use complex bureaucratic language")
+                anti.append("Do NOT dismiss the customer's situation")
+
+        if p.pattern_type == "publicity_threat":
+            if language == "ru":
+                anti.append("НЕ угрожать в ответ")
+                anti.append("НЕ обесценивать намерение клиента")
+            else:
+                anti.append("Do NOT threaten back")
+                anti.append("Do NOT dismiss the customer's intent")
 
     return anti
 
@@ -591,7 +876,7 @@ def suggest_strategy(
 
     # Merge escalation: if any pattern triggers immediate escalation, do it
     for p in patterns:
-        if p.pattern_type in ("legal_threat", "human_request") and p.severity == "critical":
+        if p.pattern_type in ("legal_threat", "human_request", "profanity") and p.severity == "critical":
             result.escalation.should_escalate_now = True
 
     return result
