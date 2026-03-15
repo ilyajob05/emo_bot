@@ -26,7 +26,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Install spaCy model
-        run: uv run python -m spacy download ru_core_news_sm
+        run: uv pip install ru_core_news_sm@https://github.com/explosion/spacy-models/releases/download/ru_core_news_sm-3.8.0/ru_core_news_sm-3.8.0-py3-none-any.whl
 
       - name: Run tests
         run: uv run pytest tests/ -v
