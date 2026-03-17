@@ -8,6 +8,8 @@ The core problem: support bots get stuck in loops — asking for an order number
 
 **Key capability: deterministic escalation detection.** The `strategy_suggest` tool identifies 7 problem patterns (repeated questions, legal threats, churn signals, requests for a human, emotional escalation, no progress, repeated contacts) and recommends concrete actions — including when to escalate to a human operator. Works without LLM calls, offline, instant.
 
+Main article: [Building an Emotional Guardian for AI Chatbots](https://medium.com/@ilyajob05/building-an-emotional-guardian-for-ai-chatbots-7e7bd0340e96)
+
 Based on: [Mistakes to Avoid When Developing Chatbots for User Support](https://medium.com/@ilyajob05/mistakes-to-avoid-when-developing-chatbots-for-user-support-5eefa21256ab)
 
 ## Strategic Dialogue Management
